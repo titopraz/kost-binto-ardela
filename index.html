@@ -10,9 +10,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
- html { -webkit-text-size-adjust:100%; text-size-adjust:100%; overflow-x:hidden; }
-  body { font-family:'Plus Jakarta Sans',ui-sans-serif,system-ui,sans-serif; background:#F6FAF7; overflow-x:hidden; }
+  @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+  html { -webkit-text-size-adjust:100%; text-size-adjust:100%; overflow-x:hidden; }
+  body { font-family:'Nunito',ui-sans-serif,system-ui,sans-serif; background:#F6FAF7; overflow-x:hidden; }
   ::-webkit-scrollbar { display:none; }
 </style>
 </head>
@@ -31,7 +31,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const { useState, useEffect, useRef } = React;
 
 /* ============ KONSTANTA & UTIL ============ */
-const HIJAU="#2E9E5B", HIJAU_TUA="#1B5E38", HIJAU_MUDA="#EAF6EE", KUNING="#F5A623", MERAH="#E15241", UNGU="#7C5CBF";
+const HIJAU="#4A6140", HIJAU_TUA="#263420", HIJAU_MUDA="#E2E7D9", KUNING="#F5A623", MERAH="#E15241", UNGU="#7C5CBF";
 const BULAN=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
 const BULAN_PANJANG=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
 const rupiah=n=>"Rp "+Math.abs(Math.round(n||0)).toLocaleString("id-ID");
