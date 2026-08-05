@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Manajer Kost — Binto & Ardela</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+  body { font-family:'Plus Jakarta Sans',ui-sans-serif,system-ui,sans-serif; background:#F6FAF7; }
+  ::-webkit-scrollbar { display:none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+/* ==========================================================
+   LANGKAH WAJIB: isi 2 baris di bawah dengan data Supabase Anda
+   (menu: Project Settings > API)
+   ========================================================== */
+const SUPABASE_URL = "https://wawferarzjnjzjgsqzzj.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "sb_publishable_Ti11WvBiQ_otWMt0iR1GlQ_OJyhyvwF";
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const { useState, useEffect, useRef } = React;
+
+/* ============ KONSTANTA & UTIL ============ */
+const HIJAU="#2E9E5B", HIJAU_TUA="#1B5E38", HIJAU_MUDA="#EAF6EE", KUNING="#F5A623", MERAH="#E15241", UNGU="#7C5CBF";
+const BULAN=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+const BULAN_PANJANG=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+const rupiah=n=>"Rp "+Math.abs(Math.round(n||0)).toLocaleString("id-ID");
+const tglID=iso=>iso?new Date(iso).toLocaleDateString("id-ID",{day:"numeric",month:"short",year:"numeric"}):"-";
+const selisihHari=iso=>Math.floor((new Date()-new Date(iso))/86400000);
+const waLink=(hp,t)=>"https://wa.me/"+(hp||"").replace(/[^0-9]/g,"").replace(/^0/,"62")+"?text="+encodeURIComponent(t);
+const namaBulanIni=()=>{const d=new Date();return BULAN_PANJANG[d.getMonth()]+" "+d.getFullYear();};
+/* Cek FORMAT NIK saja (16 digit + tanggal lahir masuk akal) — BUKAN verifikasi ke Dukcapil.
+   Tidak bisa dipakai untuk mendeteksi KTP palsu yang dibuat rapi; hanya menangkap salah ketik. */
+function validasiNIK(nik){
+  const s=(nik||"").replace(/\D/g,"");
+  if(!s) return {valid:null,pesan:""};
+  if(s.length!==16) return {valid:false,pesan:"Harus 16 digit angka ("+s.length+" saat ini)"};
+  let tgl=+s.slice(6,8), bln=+s.slice(8,10);
+  const perempuan=tgl>40;
+  if(perempuan) tgl-=40;
+  if(tgl<1||tgl>31||bln<1||bln>12) return {valid:false,pesan:"Format tanggal lahir dalam NIK tidak wajar — cek salah ketik"};
+  return {valid:true,pesan:"Format 16 digit valid ("+(perempuan?"P":"L")+") — cek fisik & foto tetap wajib, ini bukan verifikasi Dukcapil"};
+}
+
+/* ============ MESIN PEMBAYARAN ============
+   Setiap kamar terisi punya "buku tabungan":
+   - Tagihan  = jumlah bulan yang sudah jatuh tempo × sewa + tagihan tambahan (denda/parkir/listrik)
+   - Dibayar  = total semua transfer yang tercatat
+   - Saldo    = Dibayar − Tagihan
+   Saldo negatif = kurang bayar. Saldo ≥ sewa = sudah bayar di muka. */
+function hitung(room, pays, charges, denda){
+  if(!room.tenant_name) return {status:"kosong"};
+  const now=new Date();
+  const start=new Date(room.billing_start||room.start_date||now);
+  const dd=room.due_day||1, rent=room.rent||0;
+
+  let bulanTagih=0;
+  let y=start.getFullYear(), m=start.getMonth();
+  const ty=now.getFullYear(), tm=now.getMonth();
+  while(y<ty || (y===ty && m<=tm)){
+    if(y===ty && m===tm){ if(now.getDate()>=dd) bulanTagih++; }
+    else bulanTagih++;
+    m++; if(m>11){m=0;y++;}
+  }
+
+  const totalCharges=charges.reduce((a,c)=>a+c.amount,0);
+  const totalDue=bulanTagih*rent+totalCharges;
+  const totalPaid=pays.reduce((a,p)=>a+p.amount,0);
+  const saldo=totalPaid-totalDue;
+
+  let status, keterangan, hariTelat=0, saranDenda=0;
+  if(saldo<0){
+    status="telat";
+    keterangan="Kurang "+rupiah(saldo);
+    const bulanKurang=Math.max(1,Math.ceil(-saldo/Math.max(1,rent)));
+    const jt=new Date(ty,tm-(bulanKurang-1),dd);
+    hariTelat=Math.max(0,Math.floor((now-jt)/86400000));
+    const tenggang=denda&&denda.tenggang!=null?denda.tenggang:5;
+    const hariKenaDenda=Math.max(0,hariTelat-tenggang);
+    if(denda&&denda.tipe==="flat") saranDenda=hariKenaDenda*(denda.rate||0);
+    else saranDenda=Math.round(-saldo*((denda&&denda.rate||0)/100)*hariKenaDenda);
+  } else {
+    const bulanDimuka=rent>0?Math.floor(saldo/rent):0;
+    if(bulanDimuka>0){
+      status="lunas";
+      const s=new Date(ty,tm+bulanDimuka,1);
+      keterangan="Lunas s/d "+BULAN[s.getMonth()]+" "+s.getFullYear();
+    } else if(now.getDate()>=dd){
+      status="lunas"; keterangan="Lunas bulan ini";
+    } else if(dd-now.getDate()<=3){
+      status="segera"; keterangan="Jatuh tempo tgl "+dd;
+    } else {
+      status="belum"; keterangan="Jatuh tempo tgl "+dd;
+    }
+  }
+  return {status,keterangan,saldo,hariTelat,saranDenda};
+}
+const WARNA={
+  lunas:{bg:"#EAF6EE",txt:HIJAU_TUA,dot:HIJAU,label:"Lunas"},
+  segera:{bg:"#FFF6E5",txt:"#8A5B00",dot:KUNING,label:"Jatuh tempo dekat"},
+  belum:{bg:"#F1F3F2",txt:"#4A5550",dot:"#9AA6A0",label:"Belum bayar"},
+  telat:{bg:"#FDECEA",txt:"#8C2B22",dot:MERAH,label:"Kurang bayar"},
+  kosong:{bg:"#FFFFFF",txt:"#8A948F",dot:"#C9D2CC",label:"Kosong"},
+  terisi:{bg:"#EAF6EE",txt:HIJAU_TUA,dot:HIJAU,label:"Terisi"},
+};
+const pesanReminder=(r,h)=>{
+  let inti = h.saldo<0
+    ? "total kekurangan pembayaran saat ini "+rupiah(h.saldo)
+    : "pembayaran bulan "+namaBulanIni()+" sebesar "+rupiah(r.rent)+" (jatuh tempo tanggal "+r.due_day+")";
+  return "Halo "+r.tenant_name+", ini pengingat dari pengelola kost untuk kamar "+r.no+": "+inti+". Mohon transfer dan kirim buktinya ya. Terima kasih 🙏";
+};
+
+/* ============ KOMPONEN KECIL ============ */
+const Badge=({s})=>(<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{background:WARNA[s].bg,color:WARNA[s].txt}}><span className="w-2 h-2 rounded-full" style={{background:WARNA[s].dot}}></span>{WARNA[s].label}</span>);
+const Kartu=({children,onClick,className=""})=>(<div onClick={onClick} className={"bg-white rounded-2xl shadow-sm border border-gray-100 "+(onClick?"cursor-pointer active:scale-[0.99] ":"")+className}>{children}</div>);
+const Hijau=({children,onClick,className="",disabled})=>(<button onClick={onClick} disabled={disabled} className={"rounded-xl px-4 py-3 font-bold text-white text-sm flex items-center justify-center gap-2 disabled:opacity-50 "+className} style={{background:HIJAU}}>{children}</button>);
+const Input=({label,value,onChange,type="text",placeholder=""})=>(
+  <div className="mb-3">
+    <label className="text-xs font-bold text-gray-500">{label}</label>
+    <input type={type} placeholder={placeholder} className="w-full mt-1 p-3 rounded-xl border border-gray-200 text-sm font-semibold outline-none focus:border-green-500" value={value} onChange={onChange} />
+  </div>
+);
+
+/* ============ LOGIN ============ */
+function Login(){
+  const [email,setEmail]=useState(""),[pw,setPw]=useState(""),[err,setErr]=useState(""),[busy,setBusy]=useState(false);
+  const masuk=async()=>{
+    setBusy(true);setErr("");
+    const {error}=await sb.auth.signInWithPassword({email:email.trim(),password:pw});
+    if(error)setErr("Email atau password salah. Coba lagi.");
+    setBusy(false);
+  };
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{background:"linear-gradient(160deg,"+HIJAU+","+HIJAU_TUA+")"}}>
+      <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-xl">
+        <div className="text-center mb-5">
+          <div className="w-14 h-14 mx-auto rounded-2xl flex items-center justify-center text-white text-2xl font-extrabold mb-2" style={{background:HIJAU}}>K</div>
+          <h1 className="text-xl font-extrabold text-gray-800">Manajer Kost</h1>
+          <p className="text-sm text-gray-500">Kost Binto & Kost Ardela</p>
+        </div>
+        <Input label="Email" value={email} onChange={e=>setEmail(e.target.value)} type="email" />
+        <div className="mb-1">
+          <label className="text-xs font-bold text-gray-500">Password</label>
+          <input type="password" className="w-full mt-1 p-3 rounded-xl border border-gray-200 text-sm font-semibold outline-none focus:border-green-500" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&masuk()} />
+        </div>
+        {err&&<p className="text-sm font-bold mt-2" style={{color:MERAH}}>{err}</p>}
+        <Hijau className="w-full mt-4" onClick={masuk} disabled={busy}>{busy?"Memeriksa…":"Masuk"}</Hijau>
+        <p className="text-xs text-gray-400 mt-3 text-center">Lupa password? Hubungi admin untuk direset.</p>
+      </div>
+    </div>
+  );
+}
+
+/* ============ APP ============ */
+function App(){
+  const [session,setSession]=useState(undefined);
+  const [profil,setProfil]=useState(null);
+  const [rooms,setRooms]=useState([]);
+  const [pays,setPays]=useState([]);       // semua pembayaran
+  const [charges,setCharges]=useState([]); // semua tagihan tambahan
+  const [tickets,setTickets]=useState([]);
+  const [staff,setStaff]=useState([]);
+  const [denda,setDenda]=useState({tipe:"persen",rate:3,tenggang:5});
+  const [tab,setTab]=useState("beranda");
+  const [gedung,setGedung]=useState("Kost Binto");
+  const [detail,setDetail]=useState(null);
+  const [pengaturan,setPengaturan]=useState(false);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    sb.auth.getSession().then(({data})=>setSession(data.session));
+    const {data:sub}=sb.auth.onAuthStateChange((_e,s)=>setSession(s));
+    return ()=>sub.subscription.unsubscribe();
+  },[]);
+
+  const muat=async(sess)=>{
+    const s=sess||session; if(!s)return;
+    setLoading(true);
+    const {data:p}=await sb.from("profiles").select("*").eq("id",s.user.id).single();
+    setProfil(p);
+    const bisaLihat = p?.role==="owner" || p?.role==="admin";
+    if(bisaLihat){
+      const [{data:r},{data:py},{data:ch},{data:t},{data:st},{data:se}]=await Promise.all([
+        sb.from("rooms").select("*").order("building").order("floor").order("no"),
+        sb.from("payments").select("*").order("paid_at",{ascending:false}),
+        sb.from("extra_charges").select("*").order("created_at",{ascending:false}),
+        sb.from("tickets").select("*").order("created_at",{ascending:false}),
+        sb.from("staff_contacts").select("*").order("name"),
+        sb.from("settings").select("*"),
+      ]);
+      setRooms(r||[]);setPays(py||[]);setCharges(ch||[]);setTickets(t||[]);setStaff(st||[]);
+      const g=k=>(se||[]).find(x=>x.key===k)?.value;
+      setDenda({
+        tipe: g("denda_tipe")||"persen",
+        rate: +(g("denda_rate")||0),
+        tenggang: g("denda_tenggang")!=null?+g("denda_tenggang"):5,
+      });
+    } else {
+      const [{data:r},{data:t},{data:st}]=await Promise.all([
+        sb.rpc("rooms_for_staff"),
+        sb.from("tickets").select("*").order("created_at",{ascending:false}),
+        sb.from("staff_contacts").select("*").order("name"),
+      ]);
+      setRooms(r||[]);setTickets(t||[]);setStaff(st||[]);setPays([]);setCharges([]);
+      setTab("kamar");
+    }
+    setLoading(false);
+  };
+  useEffect(()=>{if(session)muat(session);},[session?.user?.id]);
+  useEffect(()=>{
+    const f=()=>document.visibilityState==="visible"&&session&&muat();
+    document.addEventListener("visibilitychange",f);
+    return ()=>document.removeEventListener("visibilitychange",f);
+  },[session]);
+
+  if(session===undefined) return <div className="min-h-screen flex items-center justify-center text-gray-400 font-bold">Memuat…</div>;
+  if(!session) return <Login />;
+  if(loading||!profil) return <div className="min-h-screen flex items-center justify-center text-gray-400 font-bold">Memuat data kost…</div>;
+
+  const owner=profil.role==="owner";
+  const admin=profil.role==="admin";
+  const lihatPenyewa=owner||admin;
+  const kelolaUang=owner;
+  const paysByRoom=id=>pays.filter(p=>p.room_id===id);
+  const chargesByRoom=id=>charges.filter(c=>c.room_id===id);
+  const H=r=>lihatPenyewa?hitung(r,paysByRoom(r.id),chargesByRoom(r.id),denda):{status:r.occupied?"terisi":"kosong"};
+  const room=detail?rooms.find(r=>r.id===detail):null;
+  const tabs=lihatPenyewa
+    ?[["beranda","🏠","Beranda"],["kamar","🚪","Kamar"],["bayar","💳","Bayar"],["servis","🔧","Servis"],["staf","👥","Staf"]]
+    :[["kamar","🚪","Kamar"],["servis","🔧","Servis"],["staf","👥","Staf"]];
+  const beranda=lihatPenyewa&&tab==="beranda"&&!room;
+  const sapaan=owner?"Pemilik":admin?"Admin":"Staf";
+
+  return (
+    <div className="min-h-screen pb-24 max-w-md mx-auto relative bg-[#F6FAF7] shadow-2xl">
+      <div className="px-4 pt-5 text-white" style={{background:"linear-gradient(135deg,"+HIJAU+","+HIJAU_TUA+")",paddingBottom:beranda?"4.5rem":"1.25rem",borderRadius:"0 0 1.5rem 1.5rem"}}>
+        <div className="flex items-center gap-3">
+          {room&&<button onClick={()=>setDetail(null)} className="text-2xl font-bold -ml-1">‹</button>}
+          <div className="flex-1">
+            <h1 className="text-lg font-extrabold leading-tight">{room?"Kamar "+room.no:"Halo, "+(profil.name||session.user.email.split("@")[0])+" 👋"}</h1>
+            <p className="text-xs opacity-90">{room?room.building:namaBulanIni()+" · "+sapaan}</p>
+          </div>
+          {!room&&kelolaUang&&<button onClick={()=>setPengaturan(true)} className="text-lg bg-white/20 rounded-lg px-2.5 py-1.5">⚙️</button>}
+          {!room&&<button onClick={()=>sb.auth.signOut()} className="text-xs font-bold bg-white/20 rounded-lg px-3 py-1.5">Keluar</button>}
+        </div>
+      </div>
+
+      <div className="px-4" style={{marginTop:beranda?"-3.5rem":"1rem"}}>
+        {room
+          ? <Detail room={room} owner={owner} lihatPenyewa={lihatPenyewa} kelolaUang={kelolaUang} h={H(room)} pays={paysByRoom(room.id)} charges={chargesByRoom(room.id)} tickets={tickets} denda={denda} refresh={()=>muat()} />
+          : <>
+              {beranda&&<Beranda rooms={rooms} pays={pays} H={H} tickets={tickets} buka={setDetail} pindah={setTab} />}
+              {tab==="kamar"&&<TabKamar rooms={rooms} lihatPenyewa={lihatPenyewa} H={H} tickets={tickets} gedung={gedung} setGedung={setGedung} buka={setDetail} />}
+              {lihatPenyewa&&tab==="bayar"&&<TabBayar rooms={rooms} H={H} buka={setDetail} />}
+              {tab==="servis"&&<TabServis rooms={rooms} tickets={tickets} refresh={()=>muat()} buka={setDetail} />}
+              {tab==="staf"&&<TabStaf staff={staff} owner={owner} refresh={()=>muat()} />}
+            </>}
+      </div>
+
+      <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-200">
+        <div className="grid" style={{gridTemplateColumns:"repeat("+tabs.length+",1fr)"}}>
+          {tabs.map(([id,ic,l])=>(
+            <button key={id} onClick={()=>{setTab(id);setDetail(null);}} className="py-2.5 flex flex-col items-center gap-0.5">
+              <span className="text-xl" style={{filter:tab===id&&!room?"none":"grayscale(1) opacity(0.45)"}}>{ic}</span>
+              <span className="text-[11px] font-semibold" style={{color:tab===id&&!room?HIJAU_TUA:"#9AA6A0"}}>{l}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {pengaturan&&<Pengaturan denda={denda} rooms={rooms} tutup={()=>setPengaturan(false)} refresh={()=>muat()} />}
+    </div>
+  );
+}
+
+/* ============ BERANDA (pemilik & admin) ============ */
+function Beranda({rooms,pays,H,tickets,buka,pindah}){
+  const now=new Date();
+  const terisi=rooms.filter(r=>r.tenant_name);
+  const hAll=terisi.map(r=>({r,h:H(r)}));
+  const telat=hAll.filter(x=>x.h.status==="telat").sort((a,b)=>a.h.saldo-b.h.saldo);
+  const segera=hAll.filter(x=>x.h.status==="segera");
+  const lunasCount=hAll.filter(x=>x.h.status==="lunas").length;
+  const tiketAktif=tickets.filter(t=>t.status!=="selesai");
+  const inspeksi=rooms.filter(r=>r.tenant_name&&selisihHari(r.last_inspection)>30);
+
+  const masukBulan=(y,m)=>pays.filter(p=>{const d=new Date(p.paid_at);return d.getFullYear()===y&&d.getMonth()===m;}).reduce((a,p)=>a+p.amount,0);
+  const enam=[...Array(6)].map((_,i)=>{
+    const d=new Date(now.getFullYear(),now.getMonth()-5+i,1);
+    return {label:BULAN[d.getMonth()],total:masukBulan(d.getFullYear(),d.getMonth())};
+  });
+  const maxEnam=Math.max(1,...enam.map(e=>e.total));
+  const masukIni=enam[5].total;
+
+  const Aksi=({ic,l,badge,warna,onClick})=>(
+    <button onClick={onClick} className="flex flex-col items-center gap-1.5 relative">
+      <span className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl" style={{background:HIJAU_MUDA}}>{ic}</span>
+      {badge>0&&<span className="absolute -top-1 right-1 min-w-[20px] h-5 px-1 rounded-full text-[11px] font-extrabold text-white flex items-center justify-center" style={{background:warna}}>{badge}</span>}
+      <span className="text-[11px] font-bold text-gray-600">{l}</span>
+    </button>
+  );
+  const Baris=({r,h})=>(
+    <div className="flex items-center gap-3 p-2 rounded-xl" style={{background:WARNA[h.status].bg}}>
+      <button onClick={()=>buka(r.id)} className="flex-1 text-left">
+        <p className="font-bold text-sm text-gray-800">{r.no} · {r.tenant_name}</p>
+        <p className="text-xs font-semibold" style={{color:WARNA[h.status].txt}}>{h.keterangan}{h.hariTelat>0?" · "+h.hariTelat+" hari":""}</p>
+      </button>
+      <a href={waLink(r.tenant_phone,pesanReminder(r,h))} target="_blank" className="px-3 py-2 rounded-xl text-white text-xs font-bold" style={{background:"#25D366"}}>💬 Ingatkan</a>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <Kartu className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-bold text-gray-400">UANG MASUK {namaBulanIni().toUpperCase()}</p>
+            <p className="text-xl font-extrabold" style={{color:HIJAU_TUA}}>{rupiah(masukIni)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] font-bold text-gray-400">KAMAR TERISI</p>
+            <p className="text-xl font-extrabold text-gray-800">{terisi.length}<span className="text-sm text-gray-400">/{rooms.length}</span></p>
+          </div>
+        </div>
+        <div className="mt-3 h-2 rounded-full bg-gray-100 overflow-hidden">
+          <div className="h-full rounded-full" style={{width:(lunasCount/Math.max(1,terisi.length)*100)+"%",background:HIJAU}}></div>
+        </div>
+        <p className="text-[11px] font-semibold text-gray-400 mt-1">{lunasCount} dari {terisi.length} penyewa lunas</p>
+      </Kartu>
+
+      <Kartu className="p-4">
+        <div className="grid grid-cols-4 gap-2">
+          <Aksi ic="🚪" l="Kamar" badge={rooms.length-terisi.length} warna="#6B7770" onClick={()=>pindah("kamar")} />
+          <Aksi ic="💳" l="Bayar" badge={telat.length} warna={MERAH} onClick={()=>pindah("bayar")} />
+          <Aksi ic="🔧" l="Servis" badge={tiketAktif.length} warna={KUNING} onClick={()=>pindah("servis")} />
+          <Aksi ic="📋" l="Inspeksi" badge={inspeksi.length} warna={UNGU} onClick={()=>pindah("kamar")} />
+        </div>
+      </Kartu>
+
+      {telat.length>0&&<Kartu className="p-4">
+        <h2 className="font-extrabold text-gray-800 mb-3">⚠️ Kurang bayar ({telat.length})</h2>
+        <div className="space-y-2">{telat.slice(0,6).map(({r,h})=><Baris key={r.id} r={r} h={h} />)}</div>
+        {telat.length>6&&<button onClick={()=>pindah("bayar")} className="mt-3 text-sm font-bold" style={{color:HIJAU}}>Lihat semua →</button>}
+      </Kartu>}
+
+      {segera.length>0&&<Kartu className="p-4">
+        <h2 className="font-extrabold text-gray-800 mb-3">⏰ Jatuh tempo 3 hari ke depan</h2>
+        <div className="space-y-2">{segera.map(({r,h})=><Baris key={r.id} r={r} h={h} />)}</div>
+      </Kartu>}
+
+      <Kartu className="p-4">
+        <h2 className="font-extrabold text-gray-800 mb-3">📈 Uang masuk 6 bulan terakhir</h2>
+        <div className="flex items-end gap-2 h-28">
+          {enam.map((e,i)=>(
+            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+              <span className="text-[9px] font-bold text-gray-400">{e.total>0?(e.total/1000000).toFixed(1)+"jt":""}</span>
+              <div className="w-full rounded-t-lg" style={{height:Math.max(4,e.total/maxEnam*80)+"px",background:i===5?HIJAU:"#BBE3CB"}}></div>
+              <span className="text-[10px] font-bold text-gray-500">{e.label}</span>
+            </div>
+          ))}
+        </div>
+      </Kartu>
+
+      {inspeksi.length>0&&<Kartu className="p-4">
+        <h2 className="font-extrabold text-gray-800 mb-1">📋 Belum diinspeksi lebih dari 30 hari</h2>
+        <p className="text-xs text-gray-500 mb-2">Sidak rutin mencegah penumpukan barang dan kerusakan tersembunyi.</p>
+        <div className="flex flex-wrap gap-2">
+          {inspeksi.slice(0,10).map(r=>(
+            <button key={r.id} onClick={()=>buka(r.id)} className="px-3 py-1.5 rounded-lg text-sm font-bold border" style={{borderColor:"#D8CBEF",color:"#5B3FA3",background:"#F5F1FC"}}>{r.no} · {selisihHari(r.last_inspection)} hr</button>
+          ))}
+        </div>
+      </Kartu>}
+    </div>
+  );
+}
+
+/* ============ TAB KAMAR ============ */
+function TabKamar({rooms,lihatPenyewa,H,tickets,gedung,setGedung,buka}){
+  const roomsB=rooms.filter(r=>r.building===gedung);
+  const lantaiAda=[...new Set(roomsB.map(r=>r.floor))].sort((a,b)=>b-a);
+  const legend=lihatPenyewa?["lunas","segera","belum","telat","kosong"]:["terisi","kosong"];
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2">
+        {["Kost Binto","Kost Ardela"].map(g=>(
+          <button key={g} onClick={()=>setGedung(g)} className="rounded-2xl p-3 text-left border-2" style={{borderColor:gedung===g?HIJAU:"#E5EAE7",background:gedung===g?HIJAU_MUDA:"#fff"}}>
+            <p className="font-extrabold text-gray-800">{g}</p>
+            <p className="text-xs text-gray-500">{g==="Kost Binto"?"Cempaka Putih":"Percetakan Negara"}</p>
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-3 text-xs font-semibold text-gray-600">
+        {legend.map(s=><span key={s} className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{background:WARNA[s].dot}}></span>{WARNA[s].label}</span>)}
+      </div>
+      {lantaiAda.map(lt=>(
+        <Kartu key={lt} className="p-3">
+          <p className="text-xs font-extrabold text-gray-400 mb-2">LANTAI {lt}</p>
+          <div className="grid grid-cols-4 gap-2">
+            {roomsB.filter(r=>r.floor===lt).map(r=>{
+              const s=H(r).status, w=WARNA[s];
+              const tkt=tickets.some(t=>t.room_id===r.id&&t.status!=="selesai");
+              const nm=r.tenant_name?(lihatPenyewa?r.tenant_name.split(" ")[0]:"Terisi"):(r.occupied?"Terisi":"Kosong");
+              return (
+                <button key={r.id} onClick={()=>buka(r.id)} className="rounded-xl p-2 text-left border relative" style={{background:w.bg,borderColor:s==="kosong"?"#E5EAE7":w.dot+"55"}}>
+                  <p className="font-extrabold text-sm" style={{color:w.txt}}>{r.no}</p>
+                  <p className="text-[10px] truncate" style={{color:w.txt}}>{nm}</p>
+                  {tkt&&<span className="absolute top-1 right-1.5 text-[10px]">🔧</span>}
+                </button>
+              );
+            })}
+          </div>
+        </Kartu>
+      ))}
+    </div>
+  );
+}
+
+/* ============ TAB BAYAR ============ */
+function TabBayar({rooms,H,buka}){
+  const [filter,setFilter]=useState("semua"),[cari,setCari]=useState("");
+  const urut={telat:0,segera:1,belum:2,lunas:3};
+  const daftar=rooms.filter(r=>r.tenant_name)
+    .map(r=>({r,h:H(r)}))
+    .filter(({h})=>filter==="semua"||h.status===filter)
+    .filter(({r})=>(r.no+" "+r.tenant_name).toLowerCase().includes(cari.toLowerCase()))
+    .sort((a,b)=>urut[a.h.status]-urut[b.h.status]||a.h.saldo-b.h.saldo);
+  return (
+    <div className="space-y-3">
+      <input value={cari} onChange={e=>setCari(e.target.value)} placeholder="🔍 Cari nama atau nomor kamar…" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-semibold outline-none focus:border-green-500" />
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {[["semua","Semua"],["telat","Kurang"],["segera","Segera"],["belum","Belum"],["lunas","Lunas"]].map(([id,l])=>(
+          <button key={id} onClick={()=>setFilter(id)} className="px-4 py-1.5 rounded-full text-sm font-bold whitespace-nowrap border" style={filter===id?{background:HIJAU,color:"#fff",borderColor:HIJAU}:{background:"#fff",color:"#4A5550",borderColor:"#E5EAE7"}}>{l}</button>
+        ))}
+      </div>
+      {daftar.map(({r,h})=>(
+        <Kartu key={r.id} className="p-3" onClick={()=>buka(r.id)}>
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <div className="flex items-center gap-2"><p className="font-extrabold text-gray-800">{r.no}</p><Badge s={h.status} /></div>
+              <p className="text-sm font-semibold text-gray-600">{r.tenant_name}</p>
+              <p className="text-xs font-bold mt-0.5" style={{color:WARNA[h.status].txt}}>{h.keterangan}</p>
+            </div>
+            <span className="text-gray-300 text-xl">›</span>
+          </div>
+        </Kartu>
+      ))}
+      {daftar.length===0&&<p className="text-center text-sm text-gray-400 py-8">Tidak ada data untuk filter ini.</p>}
+    </div>
+  );
+}
+
+/* ============ TAB SERVIS ============ */
+function TabServis({rooms,tickets,refresh,buka}){
+  const [tambah,setTambah]=useState(false),[f,setF]=useState({});
+  const jenis=["AC","Kamar Mandi","Listrik","Cleaning","Ganti Sprei","Lainnya"];
+  const aktif=tickets.filter(t=>t.status!=="selesai");
+  const selesai=tickets.filter(t=>t.status==="selesai").slice(0,5);
+  const ubahStatus=async(id,status)=>{await sb.from("tickets").update({status}).eq("id",id);refresh();};
+  const KT=({t})=>{
+    const r=rooms.find(x=>x.id===t.room_id);
+    return (
+      <Kartu className="p-3"><div className="flex items-start gap-3">
+        <div className="p-2 rounded-xl text-lg" style={{background:t.status==="selesai"?HIJAU_MUDA:"#FFF6E5"}}>🔧</div>
+        <button className="flex-1 text-left" onClick={()=>r&&buka(r.id)}>
+          <p className="font-extrabold text-gray-800 text-sm">{r?r.no:"?"} · {t.type}</p>
+          <p className="text-xs text-gray-500">{t.descr}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Dilaporkan {tglID(t.created_at)}</p>
+        </button>
+        {t.status!=="selesai"&&<div className="flex flex-col gap-1">
+          {t.status==="baru"&&<button onClick={()=>ubahStatus(t.id,"dikerjakan")} className="text-xs font-bold px-3 py-1.5 rounded-lg" style={{background:"#FFF6E5",color:"#8A5B00"}}>Dikerjakan</button>}
+          <button onClick={()=>ubahStatus(t.id,"selesai")} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{background:HIJAU}}>Selesai</button>
+        </div>}
+      </div></Kartu>
+    );
+  };
+  return (
+    <div className="space-y-3">
+      <Hijau className="w-full" onClick={()=>setTambah(true)}>＋ Lapor kerusakan / minta cleaning</Hijau>
+      <h2 className="font-extrabold text-gray-800">Sedang ditangani ({aktif.length})</h2>
+      {aktif.map(t=><KT key={t.id} t={t} />)}
+      {aktif.length===0&&<p className="text-sm text-gray-400 text-center py-4">Tidak ada laporan aktif. 👍</p>}
+      {selesai.length>0&&<><h2 className="font-extrabold text-gray-400 text-sm mt-4">Selesai terakhir</h2>{selesai.map(t=><KT key={t.id} t={t} />)}</>}
+      {tambah&&<Modal judul="Laporan servis baru" tutup={()=>setTambah(false)} simpan={async()=>{
+        if(!f.room_id||!f.type)return;
+        await sb.from("tickets").insert({room_id:f.room_id,type:f.type,descr:f.descr||"-"});
+        setTambah(false);setF({});refresh();
+      }}>
+        <label className="text-xs font-bold text-gray-500">Kamar</label>
+        <select className="w-full mt-1 mb-3 p-3 rounded-xl border border-gray-200 text-sm font-semibold bg-white" value={f.room_id||""} onChange={e=>setF({...f,room_id:e.target.value})}>
+          <option value="">— pilih —</option>
+          {rooms.map(r=><option key={r.id} value={r.id}>{r.no} ({r.building})</option>)}
+        </select>
+        <label className="text-xs font-bold text-gray-500">Jenis</label>
+        <select className="w-full mt-1 mb-3 p-3 rounded-xl border border-gray-200 text-sm font-semibold bg-white" value={f.type||""} onChange={e=>setF({...f,type:e.target.value})}>
+          <option value="">— pilih —</option>
+          {jenis.map(j=><option key={j} value={j}>{j}</option>)}
+        </select>
+        <Input label="Keterangan (opsional)" value={f.descr||""} onChange={e=>setF({...f,descr:e.target.value})} />
+      </Modal>}
+    </div>
+  );
+}
+
+/* ============ TAB STAF ============ */
+function TabStaf({staff,owner,refresh}){
+  const [tambah,setTambah]=useState(false),[f,setF]=useState({});
+  return (
+    <div className="space-y-3">
+      {owner&&<Hijau className="w-full" onClick={()=>setTambah(true)}>＋ Tambah staf</Hijau>}
+      {staff.map(s=>(
+        <Kartu key={s.id} className="p-3 flex items-center gap-3">
+          <div className="w-11 h-11 rounded-full flex items-center justify-center font-extrabold text-white" style={{background:HIJAU}}>{s.name.split(" ").map(x=>x[0]).slice(0,2).join("")}</div>
+          <div className="flex-1">
+            <p className="font-extrabold text-gray-800 text-sm">{s.name}</p>
+            <p className="text-xs text-gray-500">{s.role}</p>
+            <p className="text-xs text-gray-400">{s.phone}</p>
+          </div>
+          <a href={"tel:"+s.phone} className="p-2.5 rounded-xl text-lg" style={{background:HIJAU_MUDA}}>📞</a>
+          <a href={waLink(s.phone,"Halo "+s.name)} target="_blank" className="p-2.5 rounded-xl text-lg" style={{background:"#E7F9EE"}}>💬</a>
+          {owner&&<button onClick={async()=>{if(confirm("Hapus "+s.name+"?")){await sb.from("staff_contacts").delete().eq("id",s.id);refresh();}}} className="p-2.5 rounded-xl bg-red-50 text-sm">🗑️</button>}
+        </Kartu>
+      ))}
+      {tambah&&<Modal judul="Staf baru" tutup={()=>setTambah(false)} simpan={async()=>{
+        if(!f.name||!f.phone)return;
+        await sb.from("staff_contacts").insert({name:f.name,role:f.role||"Staf",phone:f.phone});
+        setTambah(false);setF({});refresh();
+      }}>
+        <Input label="Nama" value={f.name||""} onChange={e=>setF({...f,name:e.target.value})} />
+        <Input label="Tugas (mis. Penjaga Kost Binto)" value={f.role||""} onChange={e=>setF({...f,role:e.target.value})} />
+        <Input label="No. HP (08xx…)" value={f.phone||""} onChange={e=>setF({...f,phone:e.target.value})} />
+      </Modal>}
+    </div>
+  );
+}
+
+/* ============ DETAIL KAMAR ============ */
+function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda,refresh}){
+  const [checkin,setCheckin]=useState(false),[bayar,setBayar]=useState(false),[itemLain,setItemLain]=useState(false);
+  const [identitas,setIdentitas]=useState(false),[fi,setFi]=useState({});
+  const [f,setF]=useState({});
+  const tiket=tickets.filter(t=>t.room_id===room.id&&t.status!=="selesai");
+  const hariIns=selisihHari(room.last_inspection);
+
+  const lihatBukti=async(path)=>{
+    const {data}=await sb.storage.from("bukti").createSignedUrl(path,3600);
+    if(data)window.open(data.signedUrl,"_blank");
+  };
+  const lihatKtp=async(path)=>{
+    const {data}=await sb.storage.from("ktp").createSignedUrl(path,3600);
+    if(data)window.open(data.signedUrl,"_blank");
+  };
+  const inspeksiSelesai=async()=>{
+    if(owner)await sb.from("rooms").update({last_inspection:new Date().toISOString()}).eq("id",room.id);
+    else await sb.rpc("mark_inspected",{rid:room.id});
+    refresh();
+  };
+  const riwayat=[
+    ...pays.map(p=>({t:p.paid_at,jenis:"bayar",amount:p.amount,note:p.note,proof:p.proof_path,id:"p"+p.id})),
+    ...charges.map(c=>({t:c.created_at,jenis:"tagihan",amount:c.amount,note:c.descr,id:"c"+c.id})),
+  ].sort((a,b)=>new Date(b.t)-new Date(a.t)).slice(0,10);
+  const darurat=[
+    {nama:room.darurat1_nama,hp:room.darurat1_hp,hubungan:room.darurat1_hubungan},
+    {nama:room.darurat2_nama,hp:room.darurat2_hp,hubungan:room.darurat2_hubungan},
+  ].filter(k=>k.nama);
+
+  return (
+    <div className="space-y-3">
+      <Kartu className="p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-extrabold text-gray-800 text-lg">{lihatPenyewa?"Penyewa":"Status kamar"}</h2>
+          <Badge s={h.status} />
+        </div>
+        {room.type&&<p className="text-xs font-bold mb-2" style={{color:HIJAU_TUA}}>{room.type}{room.harga_acuan?" · acuan "+rupiah(room.harga_acuan)+"/bulan":""}</p>}
+        {lihatPenyewa?(room.tenant_name?(<>
+          <p className="font-bold text-gray-800">{room.tenant_name}</p>
+          <p className="text-sm text-gray-500">{room.tenant_phone} · masuk {tglID(room.start_date)}</p>
+          <p className="text-sm text-gray-500">{rupiah(room.rent)}/bulan · jatuh tempo tanggal {room.due_day}</p>
+          <div className="flex gap-2 mt-3">
+            <a href={"tel:"+room.tenant_phone} className="flex-1 rounded-xl py-2.5 text-center font-bold text-sm" style={{background:HIJAU_MUDA,color:HIJAU_TUA}}>📞 Telepon</a>
+            <a href={waLink(room.tenant_phone,pesanReminder(room,h))} target="_blank" className="flex-1 rounded-xl py-2.5 text-center font-bold text-sm text-white" style={{background:"#25D366"}}>💬 WhatsApp</a>
+            {kelolaUang&&<button onClick={async()=>{if(confirm(room.tenant_name+" keluar dari kamar "+room.no+"? Riwayat pembayaran tetap tersimpan."))
+              {await sb.from("rooms").update({tenant_name:null,tenant_phone:null,due_day:null,rent:null,start_date:null,billing_start:null,
+                ktp_nik:null,ktp_alamat:null,ktp_foto_path:null,
+                darurat1_nama:null,darurat1_hp:null,darurat1_hubungan:null,
+                darurat2_nama:null,darurat2_hp:null,darurat2_hubungan:null}).eq("id",room.id);refresh();}}}
+              className="rounded-xl px-3 py-2.5 font-bold text-sm bg-red-50" style={{color:MERAH}}>Keluar</button>}
+          </div>
+        </>):(<>
+          <p className="text-sm text-gray-400 mb-3">Kamar ini kosong.</p>
+          {kelolaUang&&<Hijau className="w-full" onClick={()=>{setF({rent:room.harga_acuan||""});setCheckin(true);}}>＋ Masukkan penyewa baru</Hijau>}
+        </>)):(
+          <p className="text-sm text-gray-500">{room.occupied?"Kamar sedang dihuni.":"Kamar kosong."}</p>
+        )}
+      </Kartu>
+
+      {lihatPenyewa&&room.tenant_name&&(
+        <Kartu className="p-4">
+          <h2 className="font-extrabold text-gray-800 mb-1">Pembayaran</h2>
+          <p className="text-xl font-extrabold" style={{color:WARNA[h.status].txt}}>{h.keterangan}</p>
+          {h.status==="telat"&&h.hariTelat>0&&(
+            <p className="text-xs font-semibold text-gray-500 mt-0.5">Telat ±{h.hariTelat} hari{h.saranDenda>0?" · saran denda "+rupiah(h.saranDenda):""}</p>
+          )}
+          {kelolaUang?<div className="flex gap-2 mt-3">
+            <Hijau className="flex-1" onClick={()=>{setF({amount:h.saldo<0?-h.saldo:room.rent,note:""});setBayar(true);}}>💰 Catat pembayaran</Hijau>
+            {h.status==="telat"&&h.saranDenda>0&&<button onClick={()=>{setF({jenis:"Denda telat",amount:h.saranDenda||"",note:h.hariTelat+" hari telat"});setItemLain(true);}} className="rounded-xl px-3 py-3 font-bold text-sm border-2" style={{borderColor:MERAH,color:MERAH}}>＋ Denda</button>}
+            <button onClick={()=>{setF({jenis:"Parkir",amount:"",note:""});setItemLain(true);}} className="rounded-xl px-3 py-3 font-bold text-sm border-2" style={{borderColor:"#9AA6A0",color:"#4A5550"}}>＋ Item lain</button>
+          </div>:<p className="text-[11px] text-gray-400 mt-1">Pencatatan pembayaran & denda dilakukan Pemilik setelah cek transfer masuk.</p>}
+          {riwayat.length>0&&<div className="mt-4">
+            <p className="text-xs font-extrabold text-gray-400 mb-1">RIWAYAT TERAKHIR</p>
+            {riwayat.map(x=>(
+              <div key={x.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                <div>
+                  <p className="text-sm font-bold" style={{color:x.jenis==="bayar"?HIJAU_TUA:MERAH}}>{x.jenis==="bayar"?"+ ":"− "}{rupiah(x.amount)}</p>
+                  <p className="text-[11px] text-gray-400">{tglID(x.t)}{x.note?" · "+x.note:""}</p>
+                </div>
+                {x.proof&&<button onClick={()=>lihatBukti(x.proof)} className="text-xs font-bold px-2 py-1 rounded-lg" style={{background:HIJAU_MUDA,color:HIJAU_TUA}}>📷 Bukti</button>}
+              </div>
+            ))}
+          </div>}
+        </Kartu>
+      )}
+
+      {lihatPenyewa&&room.tenant_name&&(
+        <Kartu className="p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-extrabold text-gray-800">Identitas & kontak darurat</h2>
+            {kelolaUang&&<button onClick={()=>{
+              setFi({nik:room.ktp_nik||"",alamat:room.ktp_alamat||"",foto:room.ktp_foto_path||null,
+                d1n:room.darurat1_nama||"",d1h:room.darurat1_hp||"",d1r:room.darurat1_hubungan||"",
+                d2n:room.darurat2_nama||"",d2h:room.darurat2_hp||"",d2r:room.darurat2_hubungan||""});
+              setIdentitas(true);
+            }} className="text-xs font-bold px-3 py-1.5 rounded-lg" style={{background:HIJAU_MUDA,color:HIJAU_TUA}}>✎ {room.ktp_nik?"Ubah":"Lengkapi"}</button>}
+          </div>
+          {room.ktp_nik
+            ? <>
+                <p className="text-sm text-gray-700 font-semibold">NIK {room.ktp_nik}</p>
+                {room.ktp_alamat&&<p className="text-xs text-gray-500 mt-0.5">{room.ktp_alamat}</p>}
+                {room.ktp_foto_path&&<button onClick={()=>lihatKtp(room.ktp_foto_path)} className="mt-2 text-xs font-bold px-2 py-1 rounded-lg" style={{background:HIJAU_MUDA,color:HIJAU_TUA}}>📷 Lihat foto KTP</button>}
+              </>
+            : <p className="text-xs text-gray-400">Data KTP belum dilengkapi.</p>}
+          <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+            {darurat.length===0&&<p className="text-xs text-gray-400">Kontak darurat belum diisi.</p>}
+            {darurat.map((k,i)=>(
+              <div key={i} className="flex items-center gap-2">
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-gray-700">{k.nama}{k.hubungan?" · "+k.hubungan:""}</p>
+                  <p className="text-xs text-gray-400">{k.hp}</p>
+                </div>
+                {k.hp&&<a href={"tel:"+k.hp} className="p-2 rounded-lg text-sm" style={{background:HIJAU_MUDA}}>📞</a>}
+                {k.hp&&<a href={waLink(k.hp,"Halo "+k.nama+", ini pengelola kost — Anda tercatat sebagai kontak darurat untuk "+room.tenant_name+" di kamar "+room.no+".")} target="_blank" className="p-2 rounded-lg text-sm" style={{background:"#E7F9EE"}}>💬</a>}
+              </div>
+            ))}
+          </div>
+        </Kartu>
+      )}
+
+      <Kartu className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-extrabold text-gray-800">Inspeksi rutin</h2>
+            <p className="text-sm" style={{color:hariIns>30?"#7C5CBF":"#6B7770"}}>Terakhir {tglID(room.last_inspection)} ({hariIns} hari lalu){hariIns>30?" — sudah waktunya sidak":""}</p>
+          </div>
+          <button onClick={inspeksiSelesai} className="rounded-xl px-3 py-2.5 font-bold text-sm" style={{background:"#F5F1FC",color:"#5B3FA3"}}>📋 Sudah dicek</button>
+        </div>
+      </Kartu>
+
+      <Kartu className="p-4">
+        <h2 className="font-extrabold text-gray-800 mb-2">Servis untuk kamar ini</h2>
+        {tiket.length===0&&<p className="text-sm text-gray-400">Tidak ada laporan aktif.</p>}
+        {tiket.map(t=>(
+          <div key={t.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+            <div><p className="text-sm font-bold text-gray-700">{t.type}</p><p className="text-xs text-gray-400">{t.descr}</p></div>
+            <button onClick={async()=>{await sb.from("tickets").update({status:"selesai"}).eq("id",t.id);refresh();}} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{background:HIJAU}}>Selesai</button>
+          </div>
+        ))}
+      </Kartu>
+
+      {bayar&&<ModalBayar room={room} f={f} setF={setF} tutup={()=>setBayar(false)} refresh={refresh} />}
+
+      {itemLain&&<Modal judul={"＋ Item tagihan — kamar "+room.no} tutup={()=>setItemLain(false)} simpan={async()=>{
+        const amt=+String(f.amount||"").replace(/\D/g,"");
+        if(!amt)return;
+        const jenis=f.jenis||"Lainnya";
+        const descr=jenis+(f.note?" — "+f.note:"");
+        await sb.from("extra_charges").insert({room_id:room.id,amount:amt,jenis,descr});
+        setItemLain(false);refresh();
+      }}>
+        <div className="mb-3">
+          <label className="text-xs font-bold text-gray-500">Jenis item</label>
+          <select className="w-full mt-1 p-3 rounded-xl border border-gray-200 text-sm font-semibold" value={f.jenis||"Denda telat"} onChange={e=>setF({...f,jenis:e.target.value})}>
+            <option>Denda telat</option><option>Parkir</option><option>Listrik</option><option>Lainnya</option>
+          </select>
+        </div>
+        <Input label="Jumlah (Rp)" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})} />
+        <Input label="Keterangan (opsional)" value={f.note||""} onChange={e=>setF({...f,note:e.target.value})} />
+        <p className="text-xs text-gray-400 mb-2">Item ini menambah tagihan dan langsung terlihat di status "Kurang". Bisa juga dipakai untuk mencatat tunggakan lama saat mulai memakai aplikasi.</p>
+      </Modal>}
+
+      {checkin&&<Modal judul={"Penyewa baru — kamar "+room.no} tutup={()=>setCheckin(false)} simpan={async()=>{
+        if(!f.name||!f.phone)return;
+        const today=new Date().toISOString().slice(0,10);
+        await sb.from("rooms").update({
+          tenant_name:f.name,tenant_phone:f.phone,
+          due_day:Math.min(28,Math.max(1,+f.due_day||1)),
+          rent:+String(f.rent||"").replace(/\D/g,"")||0,
+          start_date:today,billing_start:today,
+          ktp_nik:null,ktp_alamat:null,ktp_foto_path:null,
+          darurat1_nama:null,darurat1_hp:null,darurat1_hubungan:null,
+          darurat2_nama:null,darurat2_hp:null,darurat2_hubungan:null,
+        }).eq("id",room.id);
+        setCheckin(false);setF({});refresh();
+      }}>
+        <Input label="Nama penyewa" value={f.name||""} onChange={e=>setF({...f,name:e.target.value})} />
+        <Input label="No. HP (08xx…)" value={f.phone||""} onChange={e=>setF({...f,phone:e.target.value})} />
+        <Input label="Sewa per bulan (Rp)" value={f.rent||""} onChange={e=>setF({...f,rent:e.target.value})} />
+        <Input label="Tanggal jatuh tempo tiap bulan (1–28)" value={f.due_day||""} onChange={e=>setF({...f,due_day:e.target.value})} />
+        <p className="text-xs text-gray-400 mb-2">{room.type?"Tipe kamar: "+room.type+(room.harga_acuan?" (acuan "+rupiah(room.harga_acuan)+")":"")+". ":""}Tagihan mulai dihitung dari bulan ini. Data KTP & kontak darurat bisa dilengkapi setelahnya lewat "Lengkapi" di kartu Identitas.</p>
+      </Modal>}
+
+      {identitas&&<ModalIdentitas room={room} fi={fi} setFi={setFi} tutup={()=>setIdentitas(false)} refresh={refresh} />}
+    </div>
+  );
+}
+
+/* ============ MODAL IDENTITAS & KONTAK DARURAT ============ */
+function ModalIdentitas({room,fi,setFi,tutup,refresh}){
+  const fileRef=useRef(null);
+  const [file,setFile]=useState(null),[busy,setBusy]=useState(false);
+  const cekNik=validasiNIK(fi.nik);
+  const simpan=async()=>{
+    setBusy(true);
+    const upd={
+      ktp_nik:(fi.nik||"").replace(/\D/g,""),
+      ktp_alamat:fi.alamat||"",
+      darurat1_nama:fi.d1n||"",darurat1_hp:fi.d1h||"",darurat1_hubungan:fi.d1r||"",
+      darurat2_nama:fi.d2n||"",darurat2_hp:fi.d2h||"",darurat2_hubungan:fi.d2r||"",
+    };
+    if(file){
+      await new Promise(res=>{
+        const img=new Image();
+        img.onload=()=>{
+          const sk=Math.min(1,1000/Math.max(img.width,img.height));
+          const c=document.createElement("canvas");
+          c.width=img.width*sk;c.height=img.height*sk;
+          c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+          c.toBlob(async blob=>{
+            const path=room.id+"/"+Date.now()+".jpg";
+            const {error}=await sb.storage.from("ktp").upload(path,blob,{contentType:"image/jpeg"});
+            if(!error) upd.ktp_foto_path=path;
+            res();
+          },"image/jpeg",0.75);
+        };
+        img.src=URL.createObjectURL(file);
+      });
+    }
+    await sb.from("rooms").update(upd).eq("id",room.id);
+    setBusy(false);tutup();refresh();
+  };
+  return (
+    <Modal judul={"Identitas & kontak darurat — kamar "+room.no} tutup={tutup} simpan={simpan} busy={busy}>
+      <p className="text-xs font-extrabold text-gray-400 mb-1">KTP</p>
+      <Input label="NIK (16 digit)" value={fi.nik||""} onChange={e=>setFi({...fi,nik:e.target.value})} />
+      {cekNik.pesan&&<p className="text-xs font-semibold mb-2 -mt-2" style={{color:cekNik.valid?HIJAU_TUA:MERAH}}>{cekNik.valid?"✓ ":"⚠ "}{cekNik.pesan}</p>}
+      <Input label="Alamat sesuai KTP" value={fi.alamat||""} onChange={e=>setFi({...fi,alamat:e.target.value})} />
+      <button onClick={()=>fileRef.current.click()} className="w-full rounded-xl py-3 font-bold text-sm border-2 mb-3" style={{borderColor:HIJAU,color:HIJAU_TUA}}>📷 {file?"✓ "+file.name:(fi.foto?"✓ Foto sudah ada — pilih untuk ganti":"Foto KTP (opsional)")}</button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e=>setFile(e.target.files[0]||null)} />
+      <p className="text-xs text-gray-400 mb-3">Aplikasi hanya cek format 16 digit — bukan verifikasi ke Dukcapil. Cocokkan wajah dengan foto KTP secara langsung saat serah terima.</p>
+
+      <p className="text-xs font-extrabold text-gray-400 mb-1">KONTAK DARURAT 1</p>
+      <Input label="Nama" value={fi.d1n||""} onChange={e=>setFi({...fi,d1n:e.target.value})} />
+      <Input label="No. HP" value={fi.d1h||""} onChange={e=>setFi({...fi,d1h:e.target.value})} />
+      <Input label="Hubungan (mis. Orang tua, Kakak)" value={fi.d1r||""} onChange={e=>setFi({...fi,d1r:e.target.value})} />
+
+      <p className="text-xs font-extrabold text-gray-400 mb-1 mt-2">KONTAK DARURAT 2</p>
+      <Input label="Nama" value={fi.d2n||""} onChange={e=>setFi({...fi,d2n:e.target.value})} />
+      <Input label="No. HP" value={fi.d2h||""} onChange={e=>setFi({...fi,d2h:e.target.value})} />
+      <Input label="Hubungan" value={fi.d2r||""} onChange={e=>setFi({...fi,d2r:e.target.value})} />
+    </Modal>
+  );
+}
+
+/* ============ MODAL CATAT PEMBAYARAN ============ */
+function ModalBayar({room,f,setF,tutup,refresh}){
+  const fileRef=useRef(null);
+  const [file,setFile]=useState(null),[busy,setBusy]=useState(false);
+  const simpan=async()=>{
+    const amt=+String(f.amount||"").replace(/\D/g,"");
+    if(!amt){alert("Isi jumlah pembayaran.");return;}
+    setBusy(true);
+    let proof=null;
+    if(file){
+      proof=await new Promise(res=>{
+        const img=new Image();
+        img.onload=()=>{
+          const sk=Math.min(1,1000/Math.max(img.width,img.height));
+          const c=document.createElement("canvas");
+          c.width=img.width*sk;c.height=img.height*sk;
+          c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+          c.toBlob(async blob=>{
+            const path=room.id+"/"+Date.now()+".jpg";
+            const {error}=await sb.storage.from("bukti").upload(path,blob,{contentType:"image/jpeg"});
+            res(error?null:path);
+          },"image/jpeg",0.75);
+        };
+        img.src=URL.createObjectURL(file);
+      });
+    }
+    await sb.from("payments").insert({room_id:room.id,amount:amt,note:f.note||null,proof_path:proof,metode:"manual"});
+    setBusy(false);tutup();refresh();
+  };
+  return (
+    <Modal judul={"Catat pembayaran — kamar "+room.no} tutup={tutup} simpan={simpan} busy={busy}>
+      <Input label="Jumlah transfer (Rp) — boleh cicilan atau beberapa bulan sekaligus" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})} />
+      <Input label="Catatan (opsional, mis. 'Sewa Jul + Agu' atau 'Cicilan ke-1')" value={f.note||""} onChange={e=>setF({...f,note:e.target.value})} />
+      <button onClick={()=>fileRef.current.click()} className="w-full rounded-xl py-3 font-bold text-sm border-2 mb-1" style={{borderColor:HIJAU,color:HIJAU_TUA}}>📷 {file?"✓ "+file.name:"Lampirkan foto bukti transfer (opsional)"}</button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e=>setFile(e.target.files[0]||null)} />
+      <p className="text-xs text-gray-400 mt-1">Sisa kurang / kelebihan bayar dihitung otomatis.</p>
+    </Modal>
+  );
+}
+
+/* ============ PENGATURAN (denda + impor Excel) ============ */
+function Pengaturan({denda,rooms,tutup,refresh}){
+  const [dTipe,setDTipe]=useState(denda.tipe||"persen");
+  const [dRate,setDRate]=useState(String(denda.rate||""));
+  const [dTenggang,setDTenggang]=useState(String(denda.tenggang!=null?denda.tenggang:5));
+  const [teks,setTeks]=useState(""),[hasil,setHasil]=useState(null),[busy,setBusy]=useState(false);
+  const simpanDenda=async()=>{
+    await sb.from("settings").upsert([
+      {key:"denda_tipe",value:dTipe},
+      {key:"denda_rate",value:String(+String(dRate).replace(/[^\d.]/g,"")||0)},
+      {key:"denda_tenggang",value:String(Math.max(0,+dTenggang||0))},
+    ]);
+    refresh();alert("Aturan denda tersimpan.");
+  };
+  const parse=()=>{
+    const baris=teks.split(/\r?\n/).map(b=>b.trim()).filter(Boolean);
+    const rows=[],gagal=[];
+    baris.forEach(b=>{
+      const c=b.split(/\t|;|,/).map(x=>x.trim());
+      if(c.length<5){gagal.push(b);return;}
+      const room=rooms.find(r=>r.no.toLowerCase()===c[0].toLowerCase());
+      if(!room){gagal.push(b);return;}
+      rows.push({id:room.id,no:room.no,name:c[1],phone:c[2],due:Math.min(28,Math.max(1,+c[3]||1)),rent:+String(c[4]).replace(/\D/g,"")||0});
+    });
+    setHasil({rows,gagal});
+  };
+  const impor=async()=>{
+    setBusy(true);
+    const today=new Date().toISOString().slice(0,10);
+    for(const r of hasil.rows){
+      await sb.from("rooms").update({tenant_name:r.name,tenant_phone:r.phone,due_day:r.due,rent:r.rent,start_date:today,billing_start:today}).eq("id",r.id);
+    }
+    setBusy(false);setHasil(null);setTeks("");refresh();
+    alert(hasil.rows.length+" kamar berhasil diisi. Tagihan mulai dihitung bulan ini.");
+  };
+  return (
+    <Modal judul="⚙️ Pengaturan" tutup={tutup} tanpaSimpan>
+      <p className="text-xs font-extrabold text-gray-400 mb-1">DENDA TELAT</p>
+      <p className="text-xs text-gray-500 mb-2">Default sesuai kebijakan yang sudah dipakai: gratis 5 hari, lalu 3% dari total tagihan per hari. Bisa diubah kapan saja.</p>
+      <div className="flex gap-2 mb-2">
+        <select className="flex-1 p-3 rounded-xl border border-gray-200 text-sm font-semibold" value={dTipe} onChange={e=>setDTipe(e.target.value)}>
+          <option value="persen">% per hari dari tagihan</option>
+          <option value="flat">Rp tetap per hari</option>
+        </select>
+        <input className="w-24 p-3 rounded-xl border border-gray-200 text-sm font-semibold" placeholder={dTipe==="persen"?"3":"25000"} value={dRate} onChange={e=>setDRate(e.target.value)} />
+      </div>
+      <div className="flex gap-2 mb-4 items-center">
+        <label className="text-xs font-semibold text-gray-500 flex-1">Masa tenggang sebelum kena denda (hari)</label>
+        <input className="w-16 p-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-center" value={dTenggang} onChange={e=>setDTenggang(e.target.value)} />
+        <Hijau className="!py-2" onClick={simpanDenda}>Simpan</Hijau>
+      </div>
+
+      <p className="text-xs font-extrabold text-gray-400 mb-1">IMPOR PENYEWA DARI EXCEL</p>
+      <p className="text-xs text-gray-500 mb-2">Dipakai untuk update penyewa kamar yang SUDAH ADA di aplikasi (Binto B201–B511, Ardela A201–A602 — pakai kode dengan huruf awalan gedung). Susun 5 kolom: <b>Kamar, Nama, HP, Tgl jatuh tempo, Sewa</b> (contoh baris: B305, Andi, 081234567890, 5, 2750000). Blok datanya, salin (Ctrl+C), lalu tempel di kotak ini.</p>
+      <textarea rows="5" className="w-full p-3 rounded-xl border border-gray-200 text-xs font-semibold" placeholder={"B305\tAndi Pratama\t081234567890\t5\t2750000"} value={teks} onChange={e=>{setTeks(e.target.value);setHasil(null);}} />
+      {!hasil
+        ? <button onClick={parse} disabled={!teks.trim()} className="w-full mt-2 rounded-xl py-3 font-bold text-sm border-2 disabled:opacity-40" style={{borderColor:HIJAU,color:HIJAU_TUA}}>Periksa data</button>
+        : <div className="mt-2">
+            <p className="text-sm font-bold" style={{color:HIJAU_TUA}}>✓ {hasil.rows.length} baris siap diimpor</p>
+            {hasil.gagal.length>0&&<p className="text-xs font-semibold" style={{color:MERAH}}>✗ {hasil.gagal.length} baris tidak dikenali (nomor kamar salah / kolom kurang) — dilewati.</p>}
+            <Hijau className="w-full mt-2" onClick={impor} disabled={busy||hasil.rows.length===0}>{busy?"Mengimpor…":"Impor "+hasil.rows.length+" kamar"}</Hijau>
+          </div>}
+    </Modal>
+  );
+}
+
+/* ============ MODAL ============ */
+function Modal({judul,children,tutup,simpan,busy,tanpaSimpan}){
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40" onClick={tutup}>
+      <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-5 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-extrabold text-gray-800 text-lg">{judul}</h3>
+          <button onClick={tutup} className="text-xl text-gray-400 font-bold px-1">✕</button>
+        </div>
+        {children}
+        {!tanpaSimpan&&<Hijau className="w-full mt-2" onClick={simpan} disabled={busy}>{busy?"Menyimpan…":"Simpan"}</Hijau>}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
