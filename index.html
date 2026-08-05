@@ -136,7 +136,7 @@ function Login(){
   const [email,setEmail]=useState(""),[pw,setPw]=useState(""),[err,setErr]=useState(""),[busy,setBusy]=useState(false);
   const masuk=async()=>{
     setBusy(true);setErr("");
-    const {error}=await sb.auth.signInWithPassword({email:email.trim(),password:pw});
+    const {error}=await sb.auth.signInWithPassword({email:email.trim().toLowerCase(),password:pw.trim().toLowerCase()});
     if(error)setErr("Email atau password salah. Coba lagi.");
     setBusy(false);
   };
