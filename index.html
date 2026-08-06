@@ -188,8 +188,7 @@ function App(){
     setLoading(true);
     const {data:p}=await sb.from("profiles").select("*").eq("id",s.user.id).single();
     setProfil(p);
-    const bisaLihat = p?.role==="owner" || p?.role==="admin";
-    if(bisaLihat){
+    if(p?.role==="owner"){
       const [{data:r},{data:py},{data:ch},{data:t},{data:st},{data:se}]=await Promise.all([
         sb.from("rooms").select("*").order("building").order("floor").order("no"),
         sb.from("payments").select("*").order("paid_at",{ascending:false}),
@@ -205,6 +204,17 @@ function App(){
         rate: +(g("denda_rate")||0),
         tenggang: g("denda_tenggang")!=null?+g("denda_tenggang"):5,
       });
+    } else if(p?.role==="admin"){
+      // Admin: status bayar + sewa + tanggal jatuh tempo (untuk cocokkan jumlah transfer
+      // penyewa), TANPA saldo/riwayat transfer/total pemasukan — dihitung di server lewat
+      // rooms_for_admin() supaya nominal uang lain tidak pernah sampai ke browser Nurul.
+      const [{data:r},{data:t},{data:st}]=await Promise.all([
+        sb.rpc("rooms_for_admin"),
+        sb.from("tickets").select("*").order("created_at",{ascending:false}),
+        sb.from("staff_contacts").select("*").order("name"),
+      ]);
+      setRooms(r||[]);setTickets(t||[]);setStaff(st||[]);setPays([]);setCharges([]);
+      setTab("bayar");
     } else {
       const [{data:r},{data:t},{data:st}]=await Promise.all([
         sb.rpc("rooms_for_staff"),
@@ -233,12 +243,27 @@ function App(){
   const kelolaUang=owner;
   const paysByRoom=id=>pays.filter(p=>p.room_id===id);
   const chargesByRoom=id=>charges.filter(c=>c.room_id===id);
-  const H=r=>lihatPenyewa?hitung(r,paysByRoom(r.id),chargesByRoom(r.id),denda):{status:r.occupied?"terisi":"kosong"};
+  const H=r=>{
+    if(owner) return hitung(r,paysByRoom(r.id),chargesByRoom(r.id),denda);
+    if(admin){
+      const w=WARNA[r.status]||WARNA.kosong;
+      return {
+        status:r.status,
+        keterangan:r.status==="telat"&&r.hari_telat>0?w.label+" · "+r.hari_telat+" hari":w.label,
+        hariTelat:r.hari_telat||0,
+        saranDenda:r.saran_denda||0,
+        saldo:0,
+      };
+    }
+    return {status:r.occupied?"terisi":"kosong"};
+  };
   const room=detail?rooms.find(r=>r.id===detail):null;
-  const tabs=lihatPenyewa
+  const tabs=owner
     ?[["beranda","🏠","Beranda"],["kamar","🚪","Kamar"],["bayar","💳","Bayar"],["servis","🔧","Servis"],["staf","👥","Staf"]]
-    :[["kamar","🚪","Kamar"],["servis","🔧","Servis"],["staf","👥","Staf"]];
-  const beranda=lihatPenyewa&&tab==="beranda"&&!room;
+    :admin
+      ?[["kamar","🚪","Kamar"],["bayar","💳","Bayar"],["servis","🔧","Servis"],["staf","👥","Staf"]]
+      :[["kamar","🚪","Kamar"],["servis","🔧","Servis"],["staf","👥","Staf"]];
+  const beranda=owner&&tab==="beranda"&&!room;
   const sapaan=owner?"Pemilik":admin?"Admin":"Staf";
 
   return (
