@@ -113,6 +113,7 @@ const WARNA={
   kosong:{bg:"#FFFFFF",txt:"#8A948F",dot:"#C9D2CC",label:"Kosong"},
   terisi:{bg:"#EAF6EE",txt:HIJAU_TUA,dot:HIJAU,label:"Terisi"},
 };
+const AREA_BERSAMA=["Pintu Masuk","Dapur","Air","Lift","Lorong","Listrik","Internet","CCTV & Keamanan","Lahan Parkir"];
 const pesanReminder=(r,h)=>{
   let inti = h.saldo<0
     ? "total kekurangan pembayaran saat ini "+rupiah(h.saldo)
@@ -287,7 +288,7 @@ function App(){
               {beranda&&<Beranda rooms={rooms} pays={pays} H={H} tickets={tickets} buka={setDetail} pindah={setTab} />}
               {tab==="kamar"&&<TabKamar rooms={rooms} lihatPenyewa={lihatPenyewa} H={H} tickets={tickets} gedung={gedung} setGedung={setGedung} buka={setDetail} />}
               {lihatPenyewa&&tab==="bayar"&&<TabBayar rooms={rooms} H={H} buka={setDetail} />}
-              {tab==="servis"&&<TabServis rooms={rooms} tickets={tickets} refresh={()=>muat()} buka={setDetail} />}
+              {tab==="servis"&&<TabServis rooms={rooms} tickets={tickets} staff={staff} owner={owner} refresh={()=>muat()} buka={setDetail} />}
               {tab==="staf"&&<TabStaf staff={staff} owner={owner} refresh={()=>muat()} />}
             </>}
       </div>
@@ -484,55 +485,130 @@ function TabBayar({rooms,H,buka}){
   );
 }
 
-/* ============ TAB SERVIS ============ */
-function TabServis({rooms,tickets,refresh,buka}){
-  const [tambah,setTambah]=useState(false),[f,setF]=useState({});
-  const jenis=["AC","Kamar Mandi","Listrik","Cleaning","Ganti Sprei","Lainnya"];
+/* ============ TAB SERVIS & PENGADUAN ============ */
+function TabServis({rooms,tickets,staff,owner,refresh,buka}){
+  const [tambah,setTambah]=useState(false),[f,setF]=useState({}),[targetTipe,setTargetTipe]=useState("kamar");
+  const [selesaikan,setSelesaikan]=useState(null);
+  const jenis=["AC","Kamar Mandi","Listrik","Kebersihan","Ganti Sprei","Lainnya"];
   const aktif=tickets.filter(t=>t.status!=="selesai");
   const selesai=tickets.filter(t=>t.status==="selesai").slice(0,5);
   const ubahStatus=async(id,status)=>{await sb.from("tickets").update({status}).eq("id",id);refresh();};
+  const tugaskan=async(id,nama)=>{await sb.from("tickets").update({ditugaskan_ke:nama||null}).eq("id",id);refresh();};
   const KT=({t})=>{
     const r=rooms.find(x=>x.id===t.room_id);
+    const hariPending=t.status!=="selesai"?selisihHari(t.created_at):0;
     return (
       <Kartu className="p-3"><div className="flex items-start gap-3">
-        <div className="p-2 rounded-xl text-lg" style={{background:t.status==="selesai"?HIJAU_MUDA:"#FFF6E5"}}>🔧</div>
-        <button className="flex-1 text-left" onClick={()=>r&&buka(r.id)}>
-          <p className="font-extrabold text-gray-800 text-sm">{r?r.no:"?"} · {t.type}</p>
-          <p className="text-xs text-gray-500">{t.descr}</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Dilaporkan {tglID(t.created_at)}</p>
-        </button>
-        {t.status!=="selesai"&&<div className="flex flex-col gap-1">
-          {t.status==="baru"&&<button onClick={()=>ubahStatus(t.id,"dikerjakan")} className="text-xs font-bold px-3 py-1.5 rounded-lg" style={{background:"#FFF6E5",color:"#8A5B00"}}>Dikerjakan</button>}
-          <button onClick={()=>ubahStatus(t.id,"selesai")} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{background:HIJAU}}>Selesai</button>
-        </div>}
+        <div className="p-2 rounded-xl text-lg" style={{background:t.status==="selesai"?HIJAU_MUDA:"#FFF6E5"}}>{t.room_id?"🔧":"📣"}</div>
+        <div className="flex-1">
+          <button className="text-left w-full" onClick={()=>r&&buka(r.id)}>
+            <p className="font-extrabold text-gray-800 text-sm">{r?r.no:(t.area||"?")} · {t.type}</p>
+            <p className="text-xs text-gray-500">{t.descr}</p>
+            {t.pelapor_nama&&<p className="text-[11px] text-gray-400">Dilaporkan oleh {t.pelapor_nama}{t.pelapor_kamar?" · kamar "+t.pelapor_kamar:""}</p>}
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              Dilaporkan {tglID(t.created_at)}
+              {t.status!=="selesai"&&hariPending>0?" · "+hariPending+" hari pending":""}
+              {t.status==="selesai"&&t.selesai_at?" · selesai "+tglID(t.selesai_at):""}
+            </p>
+          </button>
+          {owner
+            ? <select className="mt-1 text-[11px] font-semibold border border-gray-200 rounded-lg px-1.5 py-0.5 bg-white" value={t.ditugaskan_ke||""} onChange={e=>tugaskan(t.id,e.target.value)}>
+                <option value="">Tugaskan ke…</option>
+                {staff.map(s=><option key={s.id} value={s.name}>{s.name}</option>)}
+              </select>
+            : t.ditugaskan_ke&&<p className="text-[11px] font-semibold mt-0.5" style={{color:HIJAU_TUA}}>Ditugaskan: {t.ditugaskan_ke}</p>}
+        </div>
+        {t.status!=="selesai"
+          ? <div className="flex flex-col gap-1">
+              {t.status==="baru"&&<button onClick={()=>ubahStatus(t.id,"dikerjakan")} className="text-xs font-bold px-3 py-1.5 rounded-lg" style={{background:"#FFF6E5",color:"#8A5B00"}}>Dikerjakan</button>}
+              <button onClick={()=>setSelesaikan(t)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{background:HIJAU}}>Selesai</button>
+            </div>
+          : t.foto_selesai_path&&<button onClick={()=>sb.storage.from("servis").createSignedUrl(t.foto_selesai_path,3600).then(({data})=>data&&window.open(data.signedUrl,"_blank"))} className="text-xs font-bold px-2 py-1 rounded-lg shrink-0" style={{background:HIJAU_MUDA,color:HIJAU_TUA}}>📷</button>}
       </div></Kartu>
     );
   };
   return (
     <div className="space-y-3">
-      <Hijau className="w-full" onClick={()=>setTambah(true)}>＋ Lapor kerusakan / minta cleaning</Hijau>
+      <Hijau className="w-full" onClick={()=>setTambah(true)}>＋ Lapor servis / pengaduan</Hijau>
       <h2 className="font-extrabold text-gray-800">Sedang ditangani ({aktif.length})</h2>
       {aktif.map(t=><KT key={t.id} t={t} />)}
       {aktif.length===0&&<p className="text-sm text-gray-400 text-center py-4">Tidak ada laporan aktif. 👍</p>}
       {selesai.length>0&&<><h2 className="font-extrabold text-gray-400 text-sm mt-4">Selesai terakhir</h2>{selesai.map(t=><KT key={t.id} t={t} />)}</>}
-      {tambah&&<Modal judul="Laporan servis baru" tutup={()=>setTambah(false)} simpan={async()=>{
-        if(!f.room_id||!f.type)return;
-        await sb.from("tickets").insert({room_id:f.room_id,type:f.type,descr:f.descr||"-"});
-        setTambah(false);setF({});refresh();
+      {tambah&&<Modal judul="Laporan servis / pengaduan baru" tutup={()=>setTambah(false)} simpan={async()=>{
+        if(targetTipe==="kamar"){
+          if(!f.room_id||!f.type)return;
+          await sb.from("tickets").insert({room_id:f.room_id,area:null,type:f.type,descr:f.descr||"-",pelapor_nama:f.pelapor_nama||null,pelapor_kamar:f.pelapor_kamar||null});
+        } else {
+          if(!f.area)return;
+          await sb.from("tickets").insert({room_id:null,area:f.area,type:"Pengaduan",descr:f.descr||"-",pelapor_nama:f.pelapor_nama||null,pelapor_kamar:f.pelapor_kamar||null});
+        }
+        setTambah(false);setF({});setTargetTipe("kamar");refresh();
       }}>
-        <label className="text-xs font-bold text-gray-500">Kamar</label>
-        <select className="w-full mt-1 mb-3 p-3 rounded-xl border border-gray-200 text-sm font-semibold bg-white" value={f.room_id||""} onChange={e=>setF({...f,room_id:e.target.value})}>
-          <option value="">— pilih —</option>
-          {rooms.map(r=><option key={r.id} value={r.id}>{r.no} ({r.building})</option>)}
-        </select>
-        <label className="text-xs font-bold text-gray-500">Jenis</label>
-        <select className="w-full mt-1 mb-3 p-3 rounded-xl border border-gray-200 text-sm font-semibold bg-white" value={f.type||""} onChange={e=>setF({...f,type:e.target.value})}>
-          <option value="">— pilih —</option>
-          {jenis.map(j=><option key={j} value={j}>{j}</option>)}
-        </select>
-        <Input label="Keterangan (opsional)" value={f.descr||""} onChange={e=>setF({...f,descr:e.target.value})} />
+        <div className="flex gap-2 mb-3">
+          <button onClick={()=>setTargetTipe("kamar")} className="flex-1 rounded-xl py-2.5 text-sm font-bold border-2" style={targetTipe==="kamar"?{borderColor:HIJAU,color:HIJAU_TUA,background:HIJAU_MUDA}:{borderColor:"#E5EAE7",color:"#4A5550"}}>🚪 Kamar</button>
+          <button onClick={()=>setTargetTipe("area")} className="flex-1 rounded-xl py-2.5 text-sm font-bold border-2" style={targetTipe==="area"?{borderColor:HIJAU,color:HIJAU_TUA,background:HIJAU_MUDA}:{borderColor:"#E5EAE7",color:"#4A5550"}}>🏢 Area bersama</button>
+        </div>
+        {targetTipe==="kamar" ? <>
+          <label className="text-xs font-bold text-gray-500">Kamar</label>
+          <select className="w-full mt-1 mb-3 p-3 rounded-xl border border-gray-200 text-sm font-semibold bg-white" value={f.room_id||""} onChange={e=>{const rm=rooms.find(x=>x.id===e.target.value);setF({...f,room_id:e.target.value,pelapor_nama:rm?.tenant_name||f.pelapor_nama||"",pelapor_kamar:rm?.no||""});}}>
+            <option value="">— pilih —</option>
+            {rooms.map(r=><option key={r.id} value={r.id}>{r.no} ({r.building})</option>)}
+          </select>
+          <label className="text-xs font-bold text-gray-500">Jenis</label>
+          <select className="w-full mt-1 mb-3 p-3 rounded-xl border border-gray-200 text-sm font-semibold bg-white" value={f.type||""} onChange={e=>setF({...f,type:e.target.value})}>
+            <option value="">— pilih —</option>
+            {jenis.map(j=><option key={j} value={j}>{j}</option>)}
+          </select>
+        </> : <>
+          <label className="text-xs font-bold text-gray-500">Area bersama</label>
+          <select className="w-full mt-1 mb-3 p-3 rounded-xl border border-gray-200 text-sm font-semibold bg-white" value={f.area||""} onChange={e=>setF({...f,area:e.target.value})}>
+            <option value="">— pilih —</option>
+            {AREA_BERSAMA.map(a=><option key={a} value={a}>{a}</option>)}
+          </select>
+        </>}
+        <Input label="Nama penghuni yang melapor (opsional)" value={f.pelapor_nama||""} onChange={e=>setF({...f,pelapor_nama:e.target.value})} />
+        <Input label="Kamar penghuni yang melapor (opsional)" value={f.pelapor_kamar||""} onChange={e=>setF({...f,pelapor_kamar:e.target.value})} />
+        <Input label="Detail kerusakan / pengaduan" value={f.descr||""} onChange={e=>setF({...f,descr:e.target.value})} />
       </Modal>}
+      {selesaikan&&<ModalSelesaikan tiket={selesaikan} tutup={()=>setSelesaikan(null)} refresh={refresh} />}
     </div>
+  );
+}
+
+/* ============ MODAL SELESAIKAN SERVIS/PENGADUAN (dengan foto bukti) ============ */
+function ModalSelesaikan({tiket,tutup,refresh}){
+  const fileRef=useRef(null);
+  const [file,setFile]=useState(null),[busy,setBusy]=useState(false);
+  const simpan=async()=>{
+    setBusy(true);
+    let foto=null;
+    if(file){
+      foto=await new Promise(res=>{
+        const img=new Image();
+        img.onload=()=>{
+          const sk=Math.min(1,1000/Math.max(img.width,img.height));
+          const c=document.createElement("canvas");
+          c.width=img.width*sk;c.height=img.height*sk;
+          c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+          c.toBlob(async blob=>{
+            const path=tiket.id+"/"+Date.now()+".jpg";
+            const {error}=await sb.storage.from("servis").upload(path,blob,{contentType:"image/jpeg"});
+            res(error?null:path);
+          },"image/jpeg",0.75);
+        };
+        img.src=URL.createObjectURL(file);
+      });
+    }
+    await sb.from("tickets").update({status:"selesai",selesai_at:new Date().toISOString(),foto_selesai_path:foto}).eq("id",tiket.id);
+    setBusy(false);tutup();refresh();
+  };
+  return (
+    <Modal judul={"Selesaikan — "+tiket.type+(tiket.area?" ("+tiket.area+")":"")} tutup={tutup} simpan={simpan} busy={busy}>
+      <p className="text-sm text-gray-600 mb-3">{tiket.descr}</p>
+      <button onClick={()=>fileRef.current.click()} className="w-full rounded-xl py-3 font-bold text-sm border-2 mb-1" style={{borderColor:HIJAU,color:HIJAU_TUA}}>📷 {file?"✓ "+file.name:"Foto bukti setelah dikerjakan (opsional, tapi dianjurkan)"}</button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e=>setFile(e.target.files[0]||null)} />
+      <p className="text-xs text-gray-400 mt-1">Tanggal selesai dicatat otomatis hari ini.</p>
+    </Modal>
   );
 }
 
@@ -573,7 +649,8 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
   const [checkin,setCheckin]=useState(false),[bayar,setBayar]=useState(false),[itemLain,setItemLain]=useState(false);
   const [identitas,setIdentitas]=useState(false),[fi,setFi]=useState({});
   const [f,setF]=useState({});
-  const tiket=tickets.filter(t=>t.room_id===room.id&&t.status!=="selesai");
+  const [selesaikan,setSelesaikan]=useState(null);
+  const tiketSemua=tickets.filter(t=>t.room_id===room.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   const hariIns=selisihHari(room.last_inspection);
 
   const lihatBukti=async(path)=>{
@@ -582,6 +659,10 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
   };
   const lihatKtp=async(path)=>{
     const {data}=await sb.storage.from("ktp").createSignedUrl(path,3600);
+    if(data)window.open(data.signedUrl,"_blank");
+  };
+  const lihatFotoServis=async(path)=>{
+    const {data}=await sb.storage.from("servis").createSignedUrl(path,3600);
     if(data)window.open(data.signedUrl,"_blank");
   };
   const inspeksiSelesai=async()=>{
@@ -700,15 +781,27 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
       </Kartu>
 
       <Kartu className="p-4">
-        <h2 className="font-extrabold text-gray-800 mb-2">Servis untuk kamar ini</h2>
-        {tiket.length===0&&<p className="text-sm text-gray-400">Tidak ada laporan aktif.</p>}
-        {tiket.map(t=>(
-          <div key={t.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-            <div><p className="text-sm font-bold text-gray-700">{t.type}</p><p className="text-xs text-gray-400">{t.descr}</p></div>
-            <button onClick={async()=>{await sb.from("tickets").update({status:"selesai"}).eq("id",t.id);refresh();}} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{background:HIJAU}}>Selesai</button>
+        <h2 className="font-extrabold text-gray-800 mb-2">Riwayat servis & pengaduan kamar ini</h2>
+        {tiketSemua.length===0&&<p className="text-sm text-gray-400">Belum ada laporan untuk kamar ini.</p>}
+        {tiketSemua.map(t=>(
+          <div key={t.id} className="py-2 border-b border-gray-100 last:border-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1">
+                <p className="text-sm font-bold text-gray-700">{t.type}</p>
+                <p className="text-xs text-gray-400">{t.descr}</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  Dilaporkan {tglID(t.created_at)}
+                  {t.status==="selesai"&&t.selesai_at?" · selesai "+tglID(t.selesai_at):" · "+(t.status==="dikerjakan"?"sedang dikerjakan":"belum dikerjakan")}
+                </p>
+              </div>
+              {t.status!=="selesai"
+                ? <button onClick={()=>setSelesaikan(t)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white shrink-0" style={{background:HIJAU}}>Selesai</button>
+                : t.foto_selesai_path&&<button onClick={()=>lihatFotoServis(t.foto_selesai_path)} className="text-xs font-bold px-2 py-1 rounded-lg shrink-0" style={{background:HIJAU_MUDA,color:HIJAU_TUA}}>📷 Foto</button>}
+            </div>
           </div>
         ))}
       </Kartu>
+      {selesaikan&&<ModalSelesaikan tiket={selesaikan} tutup={()=>setSelesaikan(null)} refresh={refresh} />}
 
       {bayar&&<ModalBayar room={room} f={f} setF={setF} tutup={()=>setBayar(false)} refresh={refresh} />}
 
