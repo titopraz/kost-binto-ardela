@@ -654,7 +654,7 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
   const hariIns=selisihHari(room.last_inspection);
 
   const lihatBukti=async(path)=>{
-    const {data}=await sb.storage.from("bukti").createSignedUrl(path,3600);
+    const {data}=await sb.storage.from("Bukti").createSignedUrl(path,3600);
     if(data)window.open(data.signedUrl,"_blank");
   };
   const lihatKtp=async(path)=>{
@@ -926,7 +926,7 @@ function ModalBayar({room,f,setF,tutup,refresh}){
           c.getContext("2d").drawImage(img,0,0,c.width,c.height);
           c.toBlob(async blob=>{
             const path=room.id+"/"+Date.now()+".jpg";
-            const {error}=await sb.storage.from("bukti").upload(path,blob,{contentType:"image/jpeg"});
+            const {error}=await sb.storage.from("Bukti").upload(path,blob,{contentType:"image/jpeg"});
             res(error?null:path);
           },"image/jpeg",0.75);
         };
