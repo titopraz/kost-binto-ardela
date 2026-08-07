@@ -29,6 +29,11 @@ const SUPABASE_URL = "https://wawferarzjnjzjgsqzzj.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_Ti11WvBiQ_otWMt0iR1GlQ_OJyhyvwF";
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+/* Tampilan besar (device-local, tidak sinkron ke akun lain) — meniru efek zoom browser
+   supaya semua teks & tombol (termasuk ukuran px kecil) ikut membesar bersamaan. */
+const TAMPILAN_KEY="kost_tampilan_besar";
+const terapkanTampilan=besar=>{document.body.style.zoom=besar?"1.18":"1";};
+terapkanTampilan(localStorage.getItem(TAMPILAN_KEY)==="1");
 const LOGO_BADGE = "data:image/png;base64,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";
 const { useState, useEffect, useRef } = React;
 
@@ -62,6 +67,7 @@ function validasiNIK(nik){
    Saldo negatif = kurang bayar. Saldo ≥ sewa = sudah bayar di muka. */
 function hitung(room, pays, charges, denda){
   if(!room.tenant_name) return {status:"kosong"};
+  if(room.is_free) return {status:"gratis",keterangan:"Dipinjamkan gratis (keluarga)",saldo:0,hariTelat:0,saranDenda:0};
   const now=new Date();
   const start=new Date(room.billing_start||room.start_date||now);
   const dd=room.due_day||1, rent=room.rent||0;
@@ -114,6 +120,7 @@ const WARNA={
   telat:{bg:"#FDECEA",txt:"#8C2B22",dot:MERAH,label:"Kurang bayar"},
   kosong:{bg:"#FFFFFF",txt:"#8A948F",dot:"#C9D2CC",label:"Kosong"},
   terisi:{bg:"#EAF6EE",txt:HIJAU_TUA,dot:HIJAU,label:"Terisi"},
+  gratis:{bg:"#EAF1FB",txt:"#1E4E8C",dot:"#5B8DEF",label:"Gratis (Keluarga)"},
 };
 const AREA_BERSAMA_BINTO=["Pintu Masuk","Dapur","Air","Lift","Lorong","Listrik","Internet","CCTV & Keamanan","Lahan Parkir"];
 const AREA_BERSAMA_ARDELA=["Pintu Masuk","Dapur","Air","Lift","Lorong","Internet","CCTV & Keamanan","Lahan Parkir"];
@@ -319,9 +326,10 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
   const now=new Date();
   const terisi=rooms.filter(r=>r.tenant_name);
   const hAll=terisi.map(r=>({r,h:H(r)}));
-  const telat=hAll.filter(x=>x.h.status==="telat").sort((a,b)=>a.h.saldo-b.h.saldo);
-  const segera=hAll.filter(x=>x.h.status==="segera");
-  const lunasCount=hAll.filter(x=>x.h.status==="lunas").length;
+  const hAllBayar=hAll.filter(x=>x.h.status!=="gratis");
+  const telat=hAllBayar.filter(x=>x.h.status==="telat").sort((a,b)=>a.h.saldo-b.h.saldo);
+  const segera=hAllBayar.filter(x=>x.h.status==="segera");
+  const lunasCount=hAllBayar.filter(x=>x.h.status==="lunas").length;
   const tiketAktif=tickets.filter(t=>t.status!=="selesai");
   const inspeksi=rooms.filter(r=>r.tenant_name&&selisihHari(r.last_inspection)>30);
 
@@ -364,9 +372,9 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
           </div>
         </div>
         <div className="mt-3 h-2 rounded-full bg-gray-100 overflow-hidden">
-          <div className="h-full rounded-full" style={{width:(lunasCount/Math.max(1,terisi.length)*100)+"%",background:HIJAU}}></div>
+          <div className="h-full rounded-full" style={{width:(lunasCount/Math.max(1,hAllBayar.length)*100)+"%",background:HIJAU}}></div>
         </div>
-        <p className="text-[11px] font-semibold text-gray-400 mt-1">{lunasCount} dari {terisi.length} penyewa lunas</p>
+        <p className="text-[11px] font-semibold text-gray-400 mt-1">{lunasCount} dari {hAllBayar.length} penyewa lunas</p>
       </Kartu>
 
       <Kartu className="p-4">
@@ -419,7 +427,7 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
 function TabKamar({rooms,lihatPenyewa,H,tickets,gedung,setGedung,buka}){
   const roomsB=rooms.filter(r=>r.building===gedung);
   const lantaiAda=[...new Set(roomsB.map(r=>r.floor))].sort((a,b)=>b-a);
-  const legend=lihatPenyewa?["lunas","segera","belum","telat","kosong"]:["terisi","kosong"];
+  const legend=lihatPenyewa?["lunas","segera","belum","telat","gratis","kosong"]:["terisi","kosong"];
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2">
@@ -459,7 +467,7 @@ function TabKamar({rooms,lihatPenyewa,H,tickets,gedung,setGedung,buka}){
 /* ============ TAB BAYAR ============ */
 function TabBayar({rooms,H,buka}){
   const [filter,setFilter]=useState("semua"),[cari,setCari]=useState("");
-  const urut={telat:0,segera:1,belum:2,lunas:3};
+  const urut={telat:0,segera:1,belum:2,lunas:3,gratis:4};
   const daftar=rooms.filter(r=>r.tenant_name)
     .map(r=>({r,h:H(r)}))
     .filter(({h})=>filter==="semua"||h.status===filter)
@@ -469,7 +477,7 @@ function TabBayar({rooms,H,buka}){
     <div className="space-y-3">
       <input value={cari} onChange={e=>setCari(e.target.value)} placeholder="🔍 Cari nama atau nomor kamar…" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-semibold outline-none focus:border-green-500" />
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {[["semua","Semua"],["telat","Kurang"],["segera","Segera"],["belum","Belum"],["lunas","Lunas"]].map(([id,l])=>(
+        {[["semua","Semua"],["telat","Kurang"],["segera","Segera"],["belum","Belum"],["lunas","Lunas"],["gratis","Gratis"]].map(([id,l])=>(
           <button key={id} onClick={()=>setFilter(id)} className="px-4 py-1.5 rounded-full text-sm font-bold whitespace-nowrap border" style={filter===id?{background:HIJAU,color:"#fff",borderColor:HIJAU}:{background:"#fff",color:"#4A5550",borderColor:"#E5EAE7"}}>{l}</button>
         ))}
       </div>
@@ -677,6 +685,10 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
     const {data}=await sb.storage.from("servis").createSignedUrl(path,3600);
     if(data)window.open(data.signedUrl,"_blank");
   };
+  const toggleGratis=async()=>{
+    await sb.from("rooms").update({is_free:!room.is_free}).eq("id",room.id);
+    refresh();
+  };
   const inspeksiSelesai=async()=>{
     if(owner)await sb.from("rooms").update({last_inspection:new Date().toISOString()}).eq("id",room.id);
     else await sb.rpc("mark_inspected",{rid:room.id});
@@ -703,6 +715,10 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
           <p className="font-bold text-gray-800">{room.tenant_name}</p>
           <p className="text-sm text-gray-500">{room.tenant_phone} · masuk {tglID(room.start_date)}</p>
           <p className="text-sm text-gray-500">{rupiah(room.rent)}/bulan · jatuh tempo tanggal {room.due_day}</p>
+          {kelolaUang&&<button onClick={toggleGratis} className="mt-2 flex items-center gap-2 text-xs font-bold px-3 py-1.5 rounded-lg" style={room.is_free?{background:"#EAF1FB",color:"#1E4E8C"}:{background:"#F1F3F2",color:"#6B7770"}}>
+            <span className="w-8 h-4.5 rounded-full relative shrink-0" style={{background:room.is_free?"#5B8DEF":"#C9D2CC",height:"1.125rem"}}><span className="absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all" style={{left:room.is_free?"1.15rem":"0.15rem"}}></span></span>
+            🎁 {room.is_free?"Dipinjamkan gratis untuk keluarga":"Tandai dipinjamkan gratis untuk keluarga"}
+          </button>}
           <div className="flex gap-2 mt-3">
             <a href={"tel:"+room.tenant_phone} className="flex-1 rounded-xl py-2.5 text-center font-bold text-sm" style={{background:HIJAU_MUDA,color:HIJAU_TUA}}>📞 Telepon</a>
             <a href={waLink(room.tenant_phone,pesanReminder(room,h))} target="_blank" className="flex-1 rounded-xl py-2.5 text-center font-bold text-sm text-white" style={{background:"#25D366"}}>💬 WhatsApp</a>
@@ -728,7 +744,9 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
           {h.status==="telat"&&h.hariTelat>0&&(
             <p className="text-xs font-semibold text-gray-500 mt-0.5">Telat ±{h.hariTelat} hari{h.saranDenda>0?" · saran denda "+rupiah(h.saranDenda):""}</p>
           )}
-          {kelolaUang?<div className="flex gap-2 mt-3">
+          {h.status==="gratis"?(
+            <p className="text-xs font-semibold text-gray-500 mt-1">🎁 Kamar keluarga — tidak ada tagihan bulanan, tidak masuk hitungan pemasukan.</p>
+          ):kelolaUang?<div className="flex gap-2 mt-3">
             <Hijau className="flex-1" onClick={()=>{setF({amount:h.saldo<0?-h.saldo:room.rent,note:""});setBayar(true);}}>💰 Catat pembayaran</Hijau>
             {h.status==="telat"&&h.saranDenda>0&&<button onClick={()=>{setF({jenis:"Denda telat",amount:h.saranDenda||"",note:h.hariTelat+" hari telat"});setItemLain(true);}} className="rounded-xl px-3 py-3 font-bold text-sm border-2" style={{borderColor:MERAH,color:MERAH}}>＋ Denda</button>}
             <button onClick={()=>{setF({jenis:"Parkir",amount:"",note:""});setItemLain(true);}} className="rounded-xl px-3 py-3 font-bold text-sm border-2" style={{borderColor:"#9AA6A0",color:"#4A5550"}}>＋ Item lain</button>
@@ -843,7 +861,7 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
           tenant_name:f.name,tenant_phone:f.phone,
           due_day:Math.min(28,Math.max(1,+f.due_day||1)),
           rent:+String(f.rent||"").replace(/\D/g,"")||0,
-          start_date:today,billing_start:today,
+          start_date:today,billing_start:today,is_free:!!f.isFree,
           ktp_nik:null,ktp_alamat:null,ktp_foto_path:null,
           darurat1_nama:null,darurat1_hp:null,darurat1_hubungan:null,
           darurat2_nama:null,darurat2_hp:null,darurat2_hubungan:null,
@@ -854,6 +872,9 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
         <Input label="No. HP (08xx…)" value={f.phone||""} onChange={e=>setF({...f,phone:e.target.value})} />
         <Input label="Sewa per bulan (Rp)" value={f.rent||""} onChange={e=>setF({...f,rent:e.target.value})} />
         <Input label="Tanggal jatuh tempo tiap bulan (1–28)" value={f.due_day||""} onChange={e=>setF({...f,due_day:e.target.value})} />
+        <button onClick={()=>setF({...f,isFree:!f.isFree})} className="w-full flex items-center gap-2 text-sm font-bold px-3 py-2.5 rounded-xl border-2 mb-2" style={f.isFree?{borderColor:"#5B8DEF",background:"#EAF1FB",color:"#1E4E8C"}:{borderColor:"#E5EAE7",color:"#4A5550"}}>
+          <span className="text-lg">{f.isFree?"☑":"☐"}</span> 🎁 Dipinjamkan gratis untuk keluarga (tidak ditagih)
+        </button>
         <p className="text-xs text-gray-400 mb-2">{room.type?"Tipe kamar: "+room.type+(room.harga_acuan?" (acuan "+rupiah(room.harga_acuan)+")":"")+". ":""}Tagihan mulai dihitung dari bulan ini. Data KTP & kontak darurat bisa dilengkapi setelahnya lewat "Lengkapi" di kartu Identitas.</p>
       </Modal>}
 
@@ -959,12 +980,57 @@ function ModalBayar({room,f,setF,tutup,refresh}){
   );
 }
 
+/* ============ UBAH HARGA KAMAR (dalam Pengaturan) ============ */
+function HargaKamar({rooms,refresh}){
+  const [gedung,setGedung]=useState("Kost Binto");
+  const [cari,setCari]=useState("");
+  const [edit,setEdit]=useState({});
+  const [savingId,setSavingId]=useState(null);
+  const roomsB=rooms.filter(r=>r.building===gedung).filter(r=>r.no.toLowerCase().includes(cari.toLowerCase()));
+  const simpanHarga=async r=>{
+    const raw=edit[r.id];
+    if(raw===undefined)return;
+    const val=+String(raw).replace(/\D/g,"")||0;
+    setSavingId(r.id);
+    const field=r.tenant_name?"rent":"harga_acuan";
+    await sb.from("rooms").update({[field]:val}).eq("id",r.id);
+    setSavingId(null);
+    refresh();
+  };
+  return (
+    <div className="mb-2">
+      <div className="flex gap-2 mb-2">
+        {["Kost Binto","Kost Ardela"].map(g=>(
+          <button key={g} onClick={()=>setGedung(g)} className="flex-1 rounded-lg py-1.5 text-xs font-bold border-2" style={gedung===g?{borderColor:HIJAU,color:HIJAU_TUA,background:HIJAU_MUDA}:{borderColor:"#E5EAE7",color:"#4A5550"}}>{g.replace("Kost ","")}</button>
+        ))}
+      </div>
+      <input value={cari} onChange={e=>setCari(e.target.value)} placeholder="🔍 Cari nomor kamar…" className="w-full mb-2 px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold" />
+      <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
+        {roomsB.map(r=>(
+          <div key={r.id} className="flex items-center gap-2">
+            <p className="flex-1 min-w-0 text-xs font-bold text-gray-700 truncate">{r.no} · {r.tenant_name||"kosong"}</p>
+            <input
+              className="w-24 px-2 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-right"
+              value={edit[r.id]!==undefined?edit[r.id]:(r.tenant_name?(r.rent||""):(r.harga_acuan||""))}
+              onChange={e=>setEdit({...edit,[r.id]:e.target.value})}
+            />
+            <button onClick={()=>simpanHarga(r)} disabled={savingId===r.id} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white shrink-0" style={{background:HIJAU}}>{savingId===r.id?"…":"Simpan"}</button>
+          </div>
+        ))}
+        {roomsB.length===0&&<p className="text-xs text-gray-400 text-center py-2">Tidak ada kamar.</p>}
+      </div>
+    </div>
+  );
+}
+
 /* ============ PENGATURAN (denda + impor Excel) ============ */
 function Pengaturan({denda,rooms,tutup,refresh}){
   const [dTipe,setDTipe]=useState(denda.tipe||"persen");
   const [dRate,setDRate]=useState(String(denda.rate||""));
   const [dTenggang,setDTenggang]=useState(String(denda.tenggang!=null?denda.tenggang:5));
   const [teks,setTeks]=useState(""),[hasil,setHasil]=useState(null),[busy,setBusy]=useState(false);
+  const [besar,setBesarState]=useState(localStorage.getItem(TAMPILAN_KEY)==="1");
+  const ubahBesar=v=>{setBesarState(v);localStorage.setItem(TAMPILAN_KEY,v?"1":"0");terapkanTampilan(v);};
   const simpanDenda=async()=>{
     await sb.from("settings").upsert([
       {key:"denda_tipe",value:dTipe},
@@ -996,6 +1062,17 @@ function Pengaturan({denda,rooms,tutup,refresh}){
   };
   return (
     <Modal judul="⚙️ Pengaturan" tutup={tutup} tanpaSimpan>
+      <p className="text-xs font-extrabold text-gray-400 mb-1">TAMPILAN</p>
+      <div className="flex items-center justify-between mb-4 p-3 rounded-xl bg-gray-50">
+        <div className="flex-1 pr-3">
+          <p className="text-sm font-bold text-gray-700">Ukuran teks & tombol besar</p>
+          <p className="text-xs text-gray-500">Perbesar semua tulisan di aplikasi ini (tersimpan di HP ini saja, seperti zoom tetap).</p>
+        </div>
+        <button onClick={()=>ubahBesar(!besar)} className="w-14 h-8 rounded-full relative shrink-0" style={{background:besar?HIJAU:"#D1D9D4"}}>
+          <span className="absolute top-1 w-6 h-6 rounded-full bg-white shadow transition-all" style={{left:besar?"1.75rem":"0.25rem"}}></span>
+        </button>
+      </div>
+
       <p className="text-xs font-extrabold text-gray-400 mb-1">DENDA TELAT</p>
       <p className="text-xs text-gray-500 mb-2">Default sesuai kebijakan yang sudah dipakai: gratis 5 hari, lalu 3% dari total tagihan per hari. Bisa diubah kapan saja.</p>
       <div className="flex gap-2 mb-2">
@@ -1011,7 +1088,11 @@ function Pengaturan({denda,rooms,tutup,refresh}){
         <Hijau className="!py-2" onClick={simpanDenda}>Simpan</Hijau>
       </div>
 
-      <p className="text-xs font-extrabold text-gray-400 mb-1">IMPOR PENYEWA DARI EXCEL</p>
+      <p className="text-xs font-extrabold text-gray-400 mb-1">UBAH HARGA KAMAR</p>
+      <p className="text-xs text-gray-500 mb-2">Untuk kamar terisi, mengubah angka ini langsung mengubah sewa bulanan mulai perhitungan bulan berjalan. Untuk kamar kosong, angka ini jadi harga acuan yang tampil saat check-in penyewa baru.</p>
+      <HargaKamar rooms={rooms} refresh={refresh} />
+
+      <p className="text-xs font-extrabold text-gray-400 mb-1 mt-4">IMPOR PENYEWA DARI EXCEL</p>
       <p className="text-xs text-gray-500 mb-2">Dipakai untuk update penyewa kamar yang SUDAH ADA di aplikasi (Binto B201–B511, Ardela A201–A602 — pakai kode dengan huruf awalan gedung). Susun 5 kolom: <b>Kamar, Nama, HP, Tgl jatuh tempo, Sewa</b> (contoh baris: B305, Andi, 081234567890, 5, 2750000). Blok datanya, salin (Ctrl+C), lalu tempel di kotak ini.</p>
       <textarea rows="5" className="w-full p-3 rounded-xl border border-gray-200 text-xs font-semibold" placeholder={"B305\tAndi Pratama\t081234567890\t5\t2750000"} value={teks} onChange={e=>{setTeks(e.target.value);setHasil(null);}} />
       {!hasil
