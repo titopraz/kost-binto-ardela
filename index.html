@@ -1110,13 +1110,15 @@ function Pengaturan({denda,rooms,tutup,refresh}){
 function Modal({judul,children,tutup,simpan,busy,tanpaSimpan}){
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40" onClick={tutup}>
-      <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-5 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
+      <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 mb-1 sticky top-0 bg-white z-10 border-b border-gray-100 rounded-t-3xl">
           <h3 className="font-extrabold text-gray-800 text-lg">{judul}</h3>
-          <button onClick={tutup} className="text-xl text-gray-400 font-bold px-1">✕</button>
+          <button onClick={tutup} className="text-2xl text-gray-400 font-bold w-9 h-9 -mr-1.5 flex items-center justify-center shrink-0">✕</button>
         </div>
-        {children}
-        {!tanpaSimpan&&<Hijau className="w-full mt-2" onClick={simpan} disabled={busy}>{busy?"Menyimpan…":"Simpan"}</Hijau>}
+        <div className="px-5 pb-5">
+          {children}
+          {!tanpaSimpan&&<Hijau className="w-full mt-2" onClick={simpan} disabled={busy}>{busy?"Menyimpan…":"Simpan"}</Hijau>}
+        </div>
       </div>
     </div>
   );
