@@ -332,16 +332,25 @@ function App(){
 /* ============ BERANDA (pemilik & admin) ============ */
 function Beranda({rooms,pays,H,tickets,buka,pindah}){
   const now=new Date();
-  const terisi=rooms.filter(r=>r.tenant_name);
+  const gedungList=[...new Set(rooms.map(r=>r.building))].sort();
+  const [filterGedung,setFilterGedung]=useState("Semua");
+  const roomsF=filterGedung==="Semua"?rooms:rooms.filter(r=>r.building===filterGedung);
+  const roomIdsF=new Set(roomsF.map(r=>r.id));
+  const paysF=filterGedung==="Semua"?pays:pays.filter(p=>roomIdsF.has(p.room_id));
+  const ticketsF=filterGedung==="Semua"?tickets:tickets.filter(t=>t.room_id?roomIdsF.has(t.room_id):t.building===filterGedung);
+  const [bukaTelat,setBukaTelat]=useState(false);
+  const [bukaSegera,setBukaSegera]=useState(false);
+
+  const terisi=roomsF.filter(r=>r.tenant_name);
   const hAll=terisi.map(r=>({r,h:H(r)}));
   const hAllBayar=hAll.filter(x=>x.h.status!=="gratis");
   const telat=hAllBayar.filter(x=>x.h.status==="telat").sort((a,b)=>a.h.saldo-b.h.saldo);
   const segera=hAllBayar.filter(x=>x.h.status==="segera");
   const lunasCount=hAllBayar.filter(x=>x.h.status==="lunas").length;
-  const tiketAktif=tickets.filter(t=>t.status!=="selesai");
-  const inspeksi=rooms.filter(r=>r.tenant_name&&selisihHari(r.last_inspection)>30);
+  const tiketAktif=ticketsF.filter(t=>t.status!=="selesai");
+  const inspeksi=roomsF.filter(r=>r.tenant_name&&selisihHari(r.last_inspection)>30);
 
-  const masukBulan=(y,m)=>pays.filter(p=>{const d=new Date(p.paid_at);return d.getFullYear()===y&&d.getMonth()===m;}).reduce((a,p)=>a+p.amount,0);
+  const masukBulan=(y,m)=>paysF.filter(p=>{const d=new Date(p.paid_at);return d.getFullYear()===y&&d.getMonth()===m;}).reduce((a,p)=>a+p.amount,0);
   const enam=[...Array(6)].map((_,i)=>{
     const d=new Date(now.getFullYear(),now.getMonth()-5+i,1);
     return {label:BULAN[d.getMonth()],total:masukBulan(d.getFullYear(),d.getMonth())};
@@ -368,6 +377,12 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
 
   return (
     <div className="space-y-4">
+      <div className="flex gap-2">
+        {["Semua",...gedungList].map(g=>(
+          <button key={g} onClick={()=>setFilterGedung(g)} className="flex-1 rounded-xl py-2 text-xs font-bold border-2" style={filterGedung===g?{borderColor:HIJAU,color:HIJAU_TUA,background:HIJAU_MUDA}:{borderColor:"#E5EAE7",color:"#4A5550",background:"#fff"}}>{g==="Semua"?"Semua Gedung":g.replace("Kost ","")}</button>
+        ))}
+      </div>
+
       <Kartu className="p-4">
         <div className="flex items-center justify-between">
           <div>
@@ -376,7 +391,7 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
           </div>
           <div className="text-right">
             <p className="text-[11px] font-bold text-gray-400">KAMAR TERISI</p>
-            <p className="text-xl font-extrabold text-gray-800">{terisi.length}<span className="text-sm text-gray-400">/{rooms.length}</span></p>
+            <p className="text-xl font-extrabold text-gray-800">{terisi.length}<span className="text-sm text-gray-400">/{roomsF.length}</span></p>
           </div>
         </div>
         <div className="mt-3 h-2 rounded-full bg-gray-100 overflow-hidden">
@@ -387,7 +402,7 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
 
       <Kartu className="p-4">
         <div className="grid grid-cols-4 gap-2">
-          <Aksi ic="🚪" l="Kamar" badge={rooms.length-terisi.length} warna="#6B7770" onClick={()=>pindah("kamar")} />
+          <Aksi ic="🚪" l="Kamar" badge={roomsF.length-terisi.length} warna="#6B7770" onClick={()=>pindah("kamar")} />
           <Aksi ic="💳" l="Bayar" badge={telat.length} warna={MERAH} onClick={()=>pindah("bayar")} />
           <Aksi ic="🔧" l="Servis" badge={tiketAktif.length} warna={KUNING} onClick={()=>pindah("servis")} />
           <Aksi ic="📋" l="Inspeksi" badge={inspeksi.length} warna={UNGU} onClick={()=>pindah("kamar")} />
@@ -395,14 +410,26 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
       </Kartu>
 
       {telat.length>0&&<Kartu className="p-4">
-        <h2 className="font-extrabold text-gray-800 mb-3">⚠️ Kurang bayar ({telat.length})</h2>
-        <div className="space-y-2">{telat.slice(0,6).map(({r,h})=><Baris key={r.id} r={r} h={h} />)}</div>
-        {telat.length>6&&<button onClick={()=>pindah("bayar")} className="mt-3 text-sm font-bold" style={{color:HIJAU}}>Lihat semua →</button>}
+        <button onClick={()=>setBukaTelat(v=>!v)} className="w-full flex items-center justify-between">
+          <div className="text-left">
+            <h2 className="font-extrabold text-gray-800">⚠️ Kurang bayar ({telat.length})</h2>
+            {!bukaTelat&&<p className="text-xs text-gray-400 mt-0.5">Ketuk untuk lihat daftar</p>}
+          </div>
+          <span className="text-gray-400 text-lg shrink-0 ml-2" style={{display:"inline-block",transform:bukaTelat?"rotate(180deg)":"none"}}>▾</span>
+        </button>
+        {bukaTelat&&<div className="space-y-2 mt-3">{telat.slice(0,6).map(({r,h})=><Baris key={r.id} r={r} h={h} />)}</div>}
+        {bukaTelat&&telat.length>6&&<button onClick={()=>pindah("bayar")} className="mt-3 text-sm font-bold" style={{color:HIJAU}}>Lihat semua →</button>}
       </Kartu>}
 
       {segera.length>0&&<Kartu className="p-4">
-        <h2 className="font-extrabold text-gray-800 mb-3">⏰ Jatuh tempo 3 hari ke depan</h2>
-        <div className="space-y-2">{segera.map(({r,h})=><Baris key={r.id} r={r} h={h} />)}</div>
+        <button onClick={()=>setBukaSegera(v=>!v)} className="w-full flex items-center justify-between">
+          <div className="text-left">
+            <h2 className="font-extrabold text-gray-800">⏰ Jatuh tempo 3 hari ke depan ({segera.length})</h2>
+            {!bukaSegera&&<p className="text-xs text-gray-400 mt-0.5">Ketuk untuk lihat daftar</p>}
+          </div>
+          <span className="text-gray-400 text-lg shrink-0 ml-2" style={{display:"inline-block",transform:bukaSegera?"rotate(180deg)":"none"}}>▾</span>
+        </button>
+        {bukaSegera&&<div className="space-y-2 mt-3">{segera.map(({r,h})=><Baris key={r.id} r={r} h={h} />)}</div>}
       </Kartu>}
 
       <Kartu className="p-4">
