@@ -76,6 +76,8 @@ function validasiNIK(nik){
 function hitung(room, pays, charges, denda){
   if(!room.tenant_name) return {status:"kosong"};
   if(room.is_free) return {status:"gratis",keterangan:"Dipinjamkan gratis (keluarga)",saldo:0,hariTelat:0,saranDenda:0};
+  const pendingPay=pays.find(p=>p.verified===false);
+  if(pendingPay) return {status:"pending",keterangan:"Menunggu verifikasi — "+rupiah(pendingPay.amount)+(pendingPay.note?" · "+pendingPay.note:""),saldo:0,hariTelat:0,saranDenda:0,pending:pendingPay};
   const now=new Date();
   const start=new Date(room.billing_start||room.start_date||now);
   const dd=room.due_day||1, rent=room.rent||0;
@@ -91,7 +93,7 @@ function hitung(room, pays, charges, denda){
 
   const totalCharges=charges.reduce((a,c)=>a+c.amount,0);
   const totalDue=bulanTagih*rent+totalCharges;
-  const totalPaid=pays.reduce((a,p)=>a+p.amount,0);
+  const totalPaid=pays.filter(p=>p.verified!==false).reduce((a,p)=>a+p.amount+(p.bonus_bulan||0)*rent,0);
   const saldo=totalPaid-totalDue;
 
   let status, keterangan, hariTelat=0, saranDenda=0;
@@ -123,13 +125,15 @@ function hitung(room, pays, charges, denda){
 }
 const WARNA={
   lunas:{bg:"#EAF6EE",txt:HIJAU_TUA,dot:HIJAU,label:"Lunas"},
-  segera:{bg:"#FFF6E5",txt:"#8A5B00",dot:KUNING,label:"Jatuh tempo dekat"},
+  pending:{bg:"#FFF9DB",txt:"#8A6D00",dot:"#F2C94C",label:"Menunggu verifikasi"},
+  segera:{bg:"#FCE7F3",txt:"#9D174D",dot:"#EC4899",label:"Jatuh tempo dekat"},
   belum:{bg:"#F1F3F2",txt:"#4A5550",dot:"#9AA6A0",label:"Belum bayar"},
   telat:{bg:"#FDECEA",txt:"#8C2B22",dot:MERAH,label:"Kurang bayar"},
   kosong:{bg:"#FFFFFF",txt:"#8A948F",dot:"#C9D2CC",label:"Kosong"},
   terisi:{bg:"#EAF6EE",txt:HIJAU_TUA,dot:HIJAU,label:"Terisi"},
   gratis:{bg:"#EAF1FB",txt:"#1E4E8C",dot:"#5B8DEF",label:"Gratis (Keluarga)"},
 };
+const MAX_FOTO_BYTES=5*1024*1024;
 const AREA_BERSAMA_BINTO=["Pintu Masuk","Dapur","Air","Lift","Lorong","Listrik","Internet","CCTV & Keamanan","Lahan Parkir"];
 const AREA_BERSAMA_ARDELA=["Pintu Masuk","Dapur","Air","Lift","Lorong","Internet","CCTV & Keamanan","Lahan Parkir"];
 const areaUntukGedung=g=>g==="Kost Ardela"?AREA_BERSAMA_ARDELA:AREA_BERSAMA_BINTO;
@@ -148,6 +152,20 @@ const Input=({label,value,onChange,type="text",placeholder=""})=>(
   <div className="mb-3">
     <label className="text-xs font-bold text-gray-500">{label}</label>
     <input type={type} placeholder={placeholder} className="w-full mt-1 p-3 rounded-xl border border-gray-200 text-sm font-semibold outline-none focus:border-green-500" value={value} onChange={onChange} />
+  </div>
+);
+/* Kotak Rupiah dengan pemisah ribuan titik (1.500.000) — mengetik angka apa saja tetap
+   dirapikan otomatis. onChange tetap mengirim string angka mentah (tanpa titik) supaya
+   kompatibel dengan pemakaian f.amount yang sudah ada di seluruh aplikasi. */
+const InputRupiah=({label,value,onChange,placeholder=""})=>(
+  <div className="mb-3">
+    <label className="text-xs font-bold text-gray-500">{label}</label>
+    <div className="mt-1 flex items-center rounded-xl border border-gray-200 focus-within:border-green-500 overflow-hidden">
+      <span className="pl-3 text-sm font-bold text-gray-400">Rp</span>
+      <input inputMode="numeric" placeholder={placeholder} className="w-full p-3 text-sm font-semibold outline-none"
+        value={value?(+String(value).replace(/\D/g,"")||0).toLocaleString("id-ID"):""}
+        onChange={e=>onChange({target:{value:e.target.value.replace(/\D/g,"")}})} />
+    </div>
   </div>
 );
 
@@ -269,10 +287,14 @@ function App(){
       const w=WARNA[r.status]||WARNA.kosong;
       return {
         status:r.status,
-        keterangan:r.status==="telat"&&r.hari_telat>0?w.label+" · "+r.hari_telat+" hari":w.label,
+        keterangan:r.status==="telat"&&r.hari_telat>0?w.label+" · "+r.hari_telat+" hari":(r.status==="pending"?"Menunggu verifikasi — "+rupiah(r.pending_amount||0)+(r.pending_note?" · "+r.pending_note:""):w.label),
         hariTelat:r.hari_telat||0,
         saranDenda:r.saran_denda||0,
         saldo:0,
+        pendingId:r.pending_id,
+        pendingAmount:r.pending_amount,
+        pendingNote:r.pending_note,
+        pendingProof:r.pending_proof_path,
       };
     }
     return {status:r.occupied?"terisi":"kosong"};
@@ -303,7 +325,7 @@ function App(){
 
       <div className="px-4" style={{marginTop:beranda?"-3.5rem":"1rem"}}>
         {room
-          ? <Detail room={room} owner={owner} lihatPenyewa={lihatPenyewa} kelolaUang={kelolaUang} h={H(room)} pays={paysByRoom(room.id)} charges={chargesByRoom(room.id)} tickets={tickets} denda={denda} refresh={()=>muat()} />
+          ? <Detail room={room} owner={owner} admin={admin} lihatPenyewa={lihatPenyewa} kelolaUang={kelolaUang} h={H(room)} pays={paysByRoom(room.id)} charges={chargesByRoom(room.id)} tickets={tickets} denda={denda} refresh={()=>muat()} />
           : <>
               {beranda&&<Beranda rooms={rooms} pays={pays} H={H} tickets={tickets} buka={setDetail} pindah={setTab} />}
               {tab==="kamar"&&<TabKamar rooms={rooms} lihatPenyewa={lihatPenyewa} H={H} tickets={tickets} gedung={gedung} setGedung={setGedung} buka={setDetail} />}
@@ -340,10 +362,12 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
   const ticketsF=filterGedung==="Semua"?tickets:tickets.filter(t=>t.room_id?roomIdsF.has(t.room_id):t.building===filterGedung);
   const [bukaTelat,setBukaTelat]=useState(false);
   const [bukaSegera,setBukaSegera]=useState(false);
+  const [bukaPending,setBukaPending]=useState(false);
 
   const terisi=roomsF.filter(r=>r.tenant_name);
   const hAll=terisi.map(r=>({r,h:H(r)}));
   const hAllBayar=hAll.filter(x=>x.h.status!=="gratis");
+  const pending=hAllBayar.filter(x=>x.h.status==="pending");
   const telat=hAllBayar.filter(x=>x.h.status==="telat").sort((a,b)=>a.h.saldo-b.h.saldo);
   const segera=hAllBayar.filter(x=>x.h.status==="segera");
   const lunasCount=hAllBayar.filter(x=>x.h.status==="lunas").length;
@@ -373,6 +397,15 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
       </button>
       <a href={waLink(r.tenant_phone,pesanReminder(r,h))} target="_blank" className="px-3 py-2 rounded-xl text-white text-xs font-bold" style={{background:"#25D366"}}>💬 Ingatkan</a>
     </div>
+  );
+  const BarisPending=({r,h})=>(
+    <button onClick={()=>buka(r.id)} className="w-full flex items-center gap-3 p-2 rounded-xl text-left" style={{background:WARNA.pending.bg}}>
+      <div className="flex-1">
+        <p className="font-bold text-sm text-gray-800">{r.no} · {r.tenant_name}</p>
+        <p className="text-xs font-semibold" style={{color:WARNA.pending.txt}}>{h.keterangan}</p>
+      </div>
+      <span className="text-gray-300 text-xl">›</span>
+    </button>
   );
 
   return (
@@ -408,6 +441,17 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
           <Aksi ic="📋" l="Inspeksi" badge={inspeksi.length} warna={UNGU} onClick={()=>pindah("kamar")} />
         </div>
       </Kartu>
+
+      {pending.length>0&&<Kartu className="p-4">
+        <button onClick={()=>setBukaPending(v=>!v)} className="w-full flex items-center justify-between">
+          <div className="text-left">
+            <h2 className="font-extrabold text-gray-800">🟡 Menunggu verifikasi ({pending.length})</h2>
+            {!bukaPending&&<p className="text-xs text-gray-400 mt-0.5">Ketuk untuk lihat daftar</p>}
+          </div>
+          <span className="text-gray-400 text-lg shrink-0 ml-2" style={{display:"inline-block",transform:bukaPending?"rotate(180deg)":"none"}}>▾</span>
+        </button>
+        {bukaPending&&<div className="space-y-2 mt-3">{pending.map(({r,h})=><BarisPending key={r.id} r={r} h={h} />)}</div>}
+      </Kartu>}
 
       {telat.length>0&&<Kartu className="p-4">
         <button onClick={()=>setBukaTelat(v=>!v)} className="w-full flex items-center justify-between">
@@ -462,7 +506,7 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
 function TabKamar({rooms,lihatPenyewa,H,tickets,gedung,setGedung,buka}){
   const roomsB=rooms.filter(r=>r.building===gedung);
   const lantaiAda=[...new Set(roomsB.map(r=>r.floor))].sort((a,b)=>b-a);
-  const legend=lihatPenyewa?["lunas","segera","belum","telat","gratis","kosong"]:["terisi","kosong"];
+  const legend=lihatPenyewa?["pending","telat","segera","belum","lunas","gratis","kosong"]:["terisi","kosong"];
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2">
@@ -502,7 +546,7 @@ function TabKamar({rooms,lihatPenyewa,H,tickets,gedung,setGedung,buka}){
 /* ============ TAB BAYAR ============ */
 function TabBayar({rooms,H,buka}){
   const [filter,setFilter]=useState("semua"),[cari,setCari]=useState("");
-  const urut={telat:0,segera:1,belum:2,lunas:3,gratis:4};
+  const urut={pending:0,telat:1,segera:2,belum:3,lunas:4,gratis:5};
   const daftar=rooms.filter(r=>r.tenant_name)
     .map(r=>({r,h:H(r)}))
     .filter(({h})=>filter==="semua"||h.status===filter)
@@ -512,7 +556,7 @@ function TabBayar({rooms,H,buka}){
     <div className="space-y-3">
       <input value={cari} onChange={e=>setCari(e.target.value)} placeholder="🔍 Cari nama atau nomor kamar…" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-semibold outline-none focus:border-green-500" />
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {[["semua","Semua"],["telat","Kurang"],["segera","Segera"],["belum","Belum"],["lunas","Lunas"],["gratis","Gratis"]].map(([id,l])=>(
+        {[["semua","Semua"],["pending","Verifikasi"],["telat","Kurang"],["segera","Segera"],["belum","Belum"],["lunas","Lunas"],["gratis","Gratis"]].map(([id,l])=>(
           <button key={id} onClick={()=>setFilter(id)} className="px-4 py-1.5 rounded-full text-sm font-bold whitespace-nowrap border" style={filter===id?{background:HIJAU,color:"#fff",borderColor:HIJAU}:{background:"#fff",color:"#4A5550",borderColor:"#E5EAE7"}}>{l}</button>
         ))}
       </div>
@@ -700,13 +744,31 @@ function TabStaf({staff,owner,refresh}){
 }
 
 /* ============ DETAIL KAMAR ============ */
-function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda,refresh}){
+function Detail({room,owner,admin,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda,refresh}){
   const [checkin,setCheckin]=useState(false),[bayar,setBayar]=useState(false),[itemLain,setItemLain]=useState(false);
   const [identitas,setIdentitas]=useState(false),[fi,setFi]=useState({});
   const [f,setF]=useState({});
+  const [editId,setEditId]=useState(null);
   const [selesaikan,setSelesaikan]=useState(null);
   const tiketSemua=tickets.filter(t=>t.room_id===room.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   const hariIns=selisihHari(room.last_inspection);
+  const pending = h.status==="pending"
+    ? (owner
+        ? (h.pending?{id:h.pending.id,amount:h.pending.amount,note:h.pending.note,proof:h.pending.proof_path}:null)
+        : {id:h.pendingId,amount:h.pendingAmount,note:h.pendingNote,proof:h.pendingProof})
+    : null;
+  const verifikasiPembayaran=async()=>{
+    if(!pending)return;
+    if(!confirm("Konfirmasi: sudah dicek langsung di rekening bank dan dana "+rupiah(pending.amount)+" benar-benar diterima (bukan bukti transfer palsu)?"))return;
+    await sb.from("payments").update({verified:true}).eq("id",pending.id);
+    refresh();
+  };
+  const tolakPembayaran=async()=>{
+    if(!pending)return;
+    if(!confirm("Tolak catatan pembayaran ini? Data akan dihapus permanen."))return;
+    await sb.from("payments").delete().eq("id",pending.id);
+    refresh();
+  };
 
   const lihatBukti=async(path)=>{
     const {data}=await sb.storage.from("Bukti").createSignedUrl(path,3600);
@@ -779,13 +841,29 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
           {h.status==="telat"&&h.hariTelat>0&&(
             <p className="text-xs font-semibold text-gray-500 mt-0.5">Telat ±{h.hariTelat} hari{h.saranDenda>0?" · saran denda "+rupiah(h.saranDenda):""}</p>
           )}
+
+          {h.status==="pending"&&pending&&(
+            <div className="mt-3 p-3 rounded-xl" style={{background:WARNA.pending.bg}}>
+              <p className="text-sm font-bold" style={{color:WARNA.pending.txt}}>{rupiah(pending.amount)}{pending.note?" · "+pending.note:""}</p>
+              {pending.proof&&<button onClick={()=>lihatBukti(pending.proof)} className="mt-2 text-xs font-bold px-2 py-1 rounded-lg bg-white">📷 Lihat bukti transfer</button>}
+              {owner ? (
+                <div className="flex gap-2 mt-3">
+                  <Hijau className="flex-1" onClick={verifikasiPembayaran}>✓ Verifikasi — sudah cek rekening</Hijau>
+                  <button onClick={tolakPembayaran} className="rounded-xl px-3 py-3 font-bold text-sm bg-red-50" style={{color:MERAH}}>Tolak</button>
+                </div>
+              ) : (
+                <button onClick={()=>{setF({amount:pending.amount,note:pending.note||"",existingProof:pending.proof,bonus:0});setEditId(pending.id);setBayar(true);}} className="mt-3 w-full rounded-xl py-2.5 font-bold text-sm border-2" style={{borderColor:"#8A6D00",color:"#8A6D00"}}>✎ Ubah catatan ini</button>
+              )}
+            </div>
+          )}
+
           {h.status==="gratis"?(
             <p className="text-xs font-semibold text-gray-500 mt-1">🎁 Kamar keluarga — tidak ada tagihan bulanan, tidak masuk hitungan pemasukan.</p>
-          ):kelolaUang?<div className="flex gap-2 mt-3">
-            <Hijau className="flex-1" onClick={()=>{setF({amount:h.saldo<0?-h.saldo:room.rent,note:""});setBayar(true);}}>💰 Catat pembayaran</Hijau>
-            {h.status==="telat"&&h.saranDenda>0&&<button onClick={()=>{setF({jenis:"Denda telat",amount:h.saranDenda||"",note:h.hariTelat+" hari telat"});setItemLain(true);}} className="rounded-xl px-3 py-3 font-bold text-sm border-2" style={{borderColor:MERAH,color:MERAH}}>＋ Denda</button>}
-            <button onClick={()=>{setF({jenis:"Parkir",amount:"",note:""});setItemLain(true);}} className="rounded-xl px-3 py-3 font-bold text-sm border-2" style={{borderColor:"#9AA6A0",color:"#4A5550"}}>＋ Item lain</button>
-          </div>:<p className="text-[11px] text-gray-400 mt-1">Pencatatan pembayaran & denda dilakukan Pemilik setelah cek transfer masuk.</p>}
+          ):h.status!=="pending"&&(kelolaUang||admin)?<div className="flex gap-2 mt-3">
+            <Hijau className="flex-1" onClick={()=>{setF({amount:h.saldo<0?-h.saldo:room.rent,note:"",bonus:0});setEditId(null);setBayar(true);}}>💰 Catat pembayaran</Hijau>
+            {kelolaUang&&h.status==="telat"&&h.saranDenda>0&&<button onClick={()=>{setF({jenis:"Denda telat",amount:h.saranDenda||"",note:h.hariTelat+" hari telat"});setItemLain(true);}} className="rounded-xl px-3 py-3 font-bold text-sm border-2" style={{borderColor:MERAH,color:MERAH}}>＋ Denda</button>}
+            {kelolaUang&&<button onClick={()=>{setF({jenis:"Parkir",amount:"",note:""});setItemLain(true);}} className="rounded-xl px-3 py-3 font-bold text-sm border-2" style={{borderColor:"#9AA6A0",color:"#4A5550"}}>＋ Item lain</button>}
+          </div>:(h.status!=="pending"&&<p className="text-[11px] text-gray-400 mt-1">Pencatatan pembayaran & denda dilakukan Pemilik atau Admin setelah cek transfer masuk.</p>)}
           {riwayat.length>0&&<div className="mt-4">
             <p className="text-xs font-extrabold text-gray-400 mb-1">RIWAYAT TERAKHIR</p>
             {riwayat.map(x=>(
@@ -868,7 +946,7 @@ function Detail({room,owner,lihatPenyewa,kelolaUang,h,pays,charges,tickets,denda
       </Kartu>
       {selesaikan&&<ModalSelesaikan tiket={selesaikan} tutup={()=>setSelesaikan(null)} refresh={refresh} />}
 
-      {bayar&&<ModalBayar room={room} f={f} setF={setF} tutup={()=>setBayar(false)} refresh={refresh} />}
+      {bayar&&<ModalBayar room={room} f={f} setF={setF} owner={owner} admin={admin} editId={editId} tutup={()=>{setBayar(false);setEditId(null);}} refresh={refresh} />}
 
       {itemLain&&<Modal judul={"＋ Item tagihan — kamar "+room.no} tutup={()=>setItemLain(false)} simpan={async()=>{
         const amt=+String(f.amount||"").replace(/\D/g,"");
@@ -976,9 +1054,14 @@ function ModalIdentitas({room,fi,setFi,tutup,refresh}){
 }
 
 /* ============ MODAL CATAT PEMBAYARAN ============ */
-function ModalBayar({room,f,setF,tutup,refresh}){
+function ModalBayar({room,f,setF,tutup,refresh,owner,admin,editId}){
   const fileRef=useRef(null);
-  const [file,setFile]=useState(null),[busy,setBusy]=useState(false);
+  const [file,setFile]=useState(null),[busy,setBusy]=useState(false),[errFoto,setErrFoto]=useState("");
+  const pilihFile=e=>{
+    const fl=e.target.files[0]||null;
+    if(fl&&fl.size>MAX_FOTO_BYTES){setErrFoto("Foto terlalu besar (maks 5MB). Pilih foto lain.");setFile(null);e.target.value="";return;}
+    setErrFoto("");setFile(fl);
+  };
   const simpan=async()=>{
     const amt=+String(f.amount||"").replace(/\D/g,"");
     if(!amt){alert("Isi jumlah pembayaran.");return;}
@@ -1001,15 +1084,32 @@ function ModalBayar({room,f,setF,tutup,refresh}){
         img.src=URL.createObjectURL(file);
       });
     }
-    await sb.from("payments").insert({room_id:room.id,amount:amt,note:f.note||null,proof_path:proof,metode:"manual"});
+    if(editId){
+      await sb.rpc("admin_edit_pending_payment",{p_id:editId,p_amount:amt,p_note:f.note||null,p_proof_path:proof||f.existingProof||null});
+    } else if(owner){
+      await sb.from("payments").insert({room_id:room.id,amount:amt,note:f.note||null,proof_path:proof,metode:"manual",verified:true,bonus_bulan:+(f.bonus||0)});
+    } else {
+      await sb.rpc("admin_submit_payment",{p_room_id:room.id,p_amount:amt,p_note:f.note||null,p_proof_path:proof,p_bonus_bulan:+(f.bonus||0)});
+    }
     setBusy(false);tutup();refresh();
   };
   return (
-    <Modal judul={"Catat pembayaran — kamar "+room.no} tutup={tutup} simpan={simpan} busy={busy}>
-      <Input label="Jumlah transfer (Rp) — boleh cicilan atau beberapa bulan sekaligus" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})} />
+    <Modal judul={(editId?"Ubah catatan pembayaran":"Catat pembayaran")+" — kamar "+room.no} tutup={tutup} simpan={simpan} busy={busy}>
+      {admin&&!editId&&<p className="text-xs text-gray-500 mb-3">Setelah disimpan, status kamar jadi kuning ("Menunggu verifikasi") sampai Pemilik mengecek transfer di rekening bank.</p>}
+      <InputRupiah label="Jumlah transfer — boleh cicilan atau beberapa bulan sekaligus" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})} />
       <Input label="Catatan (opsional, mis. 'Sewa Jul + Agu' atau 'Cicilan ke-1')" value={f.note||""} onChange={e=>setF({...f,note:e.target.value})} />
-      <button onClick={()=>fileRef.current.click()} className="w-full rounded-xl py-3 font-bold text-sm border-2 mb-1" style={{borderColor:HIJAU,color:HIJAU_TUA}}>📷 {file?"✓ "+file.name:"Lampirkan foto bukti transfer (opsional)"}</button>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e=>setFile(e.target.files[0]||null)} />
+      <div className="mb-3">
+        <label className="text-xs font-bold text-gray-500">Bayar di muka / deposit (dapat bonus bulan gratis)</label>
+        <div className="flex gap-2 mt-1">
+          {[[0,"Tidak"],[0.5,"6 bulan"],[1,"12 bulan"]].map(([v,l])=>(
+            <button key={l} type="button" onClick={()=>setF({...f,bonus:v})} className="flex-1 rounded-xl py-2 text-xs font-bold border-2" style={+(f.bonus||0)===v?{borderColor:HIJAU,color:HIJAU_TUA,background:HIJAU_MUDA}:{borderColor:"#E5EAE7",color:"#4A5550"}}>{l}</button>
+          ))}
+        </div>
+        {+(f.bonus||0)>0&&<p className="text-[11px] mt-1" style={{color:HIJAU_TUA}}>🎁 Penyewa dapat bonus {+f.bonus===1?"1 bulan":"setengah bulan"} gratis — otomatis masuk hitungan lunas.</p>}
+      </div>
+      <button onClick={()=>fileRef.current.click()} className="w-full rounded-xl py-3 font-bold text-sm border-2 mb-1" style={{borderColor:HIJAU,color:HIJAU_TUA}}>📷 {file?"✓ "+file.name:"Lampirkan foto bukti transfer (opsional, maks 5MB)"}</button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pilihFile} />
+      {errFoto&&<p className="text-xs font-semibold mt-1" style={{color:MERAH}}>{errFoto}</p>}
       <p className="text-xs text-gray-400 mt-1">Sisa kurang / kelebihan bayar dihitung otomatis.</p>
     </Modal>
   );
