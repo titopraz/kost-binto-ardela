@@ -883,7 +883,7 @@ function Detail({room,owner,admin,lihatPenyewa,kelolaUang,h,pays,charges,tickets
         <Kartu className="p-4">
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-extrabold text-gray-800">Identitas & kontak darurat</h2>
-            {kelolaUang&&<button onClick={()=>{
+            {(kelolaUang||admin)&&<button onClick={()=>{
               setFi({nik:room.ktp_nik||"",alamat:room.ktp_alamat||"",foto:room.ktp_foto_path||null,
                 d1n:room.darurat1_nama||"",d1h:room.darurat1_hp||"",d1r:room.darurat1_hubungan||"",
                 d2n:room.darurat2_nama||"",d2h:room.darurat2_hp||"",d2r:room.darurat2_hubungan||""});
@@ -991,13 +991,13 @@ function Detail({room,owner,admin,lihatPenyewa,kelolaUang,h,pays,charges,tickets
         <p className="text-xs text-gray-400 mb-2">{room.type?"Tipe kamar: "+room.type+(room.harga_acuan?" (acuan "+rupiah(room.harga_acuan)+")":"")+". ":""}Tagihan mulai dihitung dari bulan ini. Data KTP & kontak darurat bisa dilengkapi setelahnya lewat "Lengkapi" di kartu Identitas.</p>
       </Modal>}
 
-      {identitas&&<ModalIdentitas room={room} fi={fi} setFi={setFi} tutup={()=>setIdentitas(false)} refresh={refresh} />}
+      {identitas&&<ModalIdentitas room={room} fi={fi} setFi={setFi} admin={admin} tutup={()=>setIdentitas(false)} refresh={refresh} />}
     </div>
   );
 }
 
 /* ============ MODAL IDENTITAS & KONTAK DARURAT ============ */
-function ModalIdentitas({room,fi,setFi,tutup,refresh}){
+function ModalIdentitas({room,fi,setFi,tutup,refresh,admin}){
   const fileRef=useRef(null);
   const [file,setFile]=useState(null),[busy,setBusy]=useState(false);
   const cekNik=validasiNIK(fi.nik);
@@ -1027,7 +1027,16 @@ function ModalIdentitas({room,fi,setFi,tutup,refresh}){
         img.src=URL.createObjectURL(file);
       });
     }
-    await sb.from("rooms").update(upd).eq("id",room.id);
+    if(admin){
+      await sb.rpc("admin_update_identitas",{
+        p_room_id:room.id,
+        p_ktp_nik:upd.ktp_nik,p_ktp_alamat:upd.ktp_alamat,p_ktp_foto_path:upd.ktp_foto_path||null,
+        p_d1_nama:upd.darurat1_nama,p_d1_hp:upd.darurat1_hp,p_d1_hubungan:upd.darurat1_hubungan,
+        p_d2_nama:upd.darurat2_nama,p_d2_hp:upd.darurat2_hp,p_d2_hubungan:upd.darurat2_hubungan,
+      });
+    } else {
+      await sb.from("rooms").update(upd).eq("id",room.id);
+    }
     setBusy(false);tutup();refresh();
   };
   return (
