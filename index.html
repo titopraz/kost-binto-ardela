@@ -221,7 +221,7 @@ function App(){
     return ()=>sub.subscription.unsubscribe();
   },[]);
 
-  const muat=async(sess)=>{
+  const muat=async(sess,resetTab)=>{
     const s=sess||session; if(!s)return;
     setLoading(true);
     const {data:p}=await sb.from("profiles").select("*").eq("id",s.user.id).single();
@@ -242,6 +242,7 @@ function App(){
         rate: +(g("denda_rate")||0),
         tenggang: g("denda_tenggang")!=null?+g("denda_tenggang"):5,
       });
+      if(resetTab) setTab("kamar"); // buka default di Kamar, bukan Report — supaya angka pemasukan tidak langsung kelihatan kalau device dipakai bergantian
     } else if(p?.role==="admin"){
       // Admin: status bayar + sewa + tanggal jatuh tempo (untuk cocokkan jumlah transfer
       // penyewa), TANPA saldo/riwayat transfer/total pemasukan — dihitung di server lewat
@@ -264,11 +265,24 @@ function App(){
     }
     setLoading(false);
   };
-  useEffect(()=>{if(session)muat(session);},[session?.user?.id]);
+  useEffect(()=>{if(session)muat(session,true);},[session?.user?.id]);
   useEffect(()=>{
     const f=()=>document.visibilityState==="visible"&&session&&muat();
     document.addEventListener("visibilitychange",f);
     return ()=>document.removeEventListener("visibilitychange",f);
+  },[session]);
+
+  // Keluar otomatis kalau tidak ada aktivitas — supaya kalau device ketinggalan
+  // dalam keadaan login (mis. dipinjam admin/staf lain), sesi tidak menggantung terbuka.
+  useEffect(()=>{
+    if(!session) return;
+    const BATAS_DIAM_MS=10*60*1000; // 10 menit
+    let t;
+    const reset=()=>{clearTimeout(t);t=setTimeout(()=>{sb.auth.signOut();},BATAS_DIAM_MS);};
+    const events=["click","touchstart","keydown","scroll"];
+    events.forEach(e=>window.addEventListener(e,reset,{passive:true}));
+    reset();
+    return ()=>{clearTimeout(t);events.forEach(e=>window.removeEventListener(e,reset));};
   },[session]);
 
   if(session===undefined) return <div className="min-h-screen flex items-center justify-center text-gray-400 font-bold">Memuat…</div>;
@@ -301,7 +315,7 @@ function App(){
   };
   const room=detail?rooms.find(r=>r.id===detail):null;
   const tabs=owner
-    ?[["beranda","🏠","Beranda"],["kamar","🚪","Kamar"],["bayar","💳","Bayar"],["servis","🔧","Servis"],["staf","👥","Staf"]]
+    ?[["kamar","🚪","Kamar"],["bayar","💳","Bayar"],["servis","🔧","Servis"],["staf","👥","Staf"],["beranda","📊","Report"]]
     :admin
       ?[["kamar","🚪","Kamar"],["bayar","💳","Bayar"],["servis","🔧","Servis"],["staf","👥","Staf"]]
       :[["kamar","🚪","Kamar"],["servis","🔧","Servis"],["staf","👥","Staf"]];
@@ -363,6 +377,7 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
   const [bukaTelat,setBukaTelat]=useState(false);
   const [bukaSegera,setBukaSegera]=useState(false);
   const [bukaPending,setBukaPending]=useState(false);
+  const [bukaRingkasan,setBukaRingkasan]=useState(false);
 
   const terisi=roomsF.filter(r=>r.tenant_name);
   const hAll=terisi.map(r=>({r,h:H(r)}));
@@ -417,20 +432,37 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
       </div>
 
       <Kartu className="p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-[11px] font-bold text-gray-400">UANG MASUK {namaBulanIni().toUpperCase()}</p>
-            <p className="text-xl font-extrabold" style={{color:HIJAU_TUA}}>{rupiah(masukIni)}</p>
+        <p className="text-[11px] font-bold text-gray-400">KAMAR TERISI</p>
+        <p className="text-xl font-extrabold text-gray-800">{terisi.length}<span className="text-sm text-gray-400">/{roomsF.length}</span></p>
+      </Kartu>
+
+      <Kartu className="p-4">
+        <button onClick={()=>setBukaRingkasan(v=>!v)} className="w-full flex items-center justify-between">
+          <div className="text-left">
+            <h2 className="font-extrabold text-gray-800 text-lg">📊 Report Summary</h2>
+            {!bukaRingkasan&&<p className="text-xs text-gray-400 mt-0.5">Ketuk untuk lihat ringkasan pemasukan</p>}
           </div>
-          <div className="text-right">
-            <p className="text-[11px] font-bold text-gray-400">KAMAR TERISI</p>
-            <p className="text-xl font-extrabold text-gray-800">{terisi.length}<span className="text-sm text-gray-400">/{roomsF.length}</span></p>
+          <span className="text-gray-400 text-lg shrink-0 ml-2" style={{display:"inline-block",transform:bukaRingkasan?"rotate(180deg)":"none"}}>▾</span>
+        </button>
+        {bukaRingkasan&&<div className="mt-4">
+          <p className="text-xs font-bold text-gray-400">UANG MASUK {namaBulanIni().toUpperCase()}</p>
+          <p className="text-3xl font-extrabold" style={{color:HIJAU_TUA}}>{rupiah(masukIni)}</p>
+          <div className="mt-3 h-2 rounded-full bg-gray-100 overflow-hidden">
+            <div className="h-full rounded-full" style={{width:(lunasCount/Math.max(1,hAllBayar.length)*100)+"%",background:HIJAU}}></div>
           </div>
-        </div>
-        <div className="mt-3 h-2 rounded-full bg-gray-100 overflow-hidden">
-          <div className="h-full rounded-full" style={{width:(lunasCount/Math.max(1,hAllBayar.length)*100)+"%",background:HIJAU}}></div>
-        </div>
-        <p className="text-[11px] font-semibold text-gray-400 mt-1">{lunasCount} dari {hAllBayar.length} penyewa lunas</p>
+          <p className="text-sm font-semibold text-gray-500 mt-1">{lunasCount} dari {hAllBayar.length} penyewa lunas</p>
+
+          <h3 className="font-extrabold text-gray-800 mt-5 mb-3">📈 Uang masuk 6 bulan terakhir</h3>
+          <div className="flex items-end gap-2 h-28">
+            {enam.map((e,i)=>(
+              <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                <span className="text-[9px] font-bold text-gray-400">{e.total>0?(e.total/1000000).toFixed(1)+"jt":""}</span>
+                <div className="w-full rounded-t-lg" style={{height:Math.max(4,e.total/maxEnam*80)+"px",background:i===5?HIJAU:"#BBE3CB"}}></div>
+                <span className="text-[10px] font-bold text-gray-500">{e.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>}
       </Kartu>
 
       <Kartu className="p-4">
@@ -475,19 +507,6 @@ function Beranda({rooms,pays,H,tickets,buka,pindah}){
         </button>
         {bukaSegera&&<div className="space-y-2 mt-3">{segera.map(({r,h})=><Baris key={r.id} r={r} h={h} />)}</div>}
       </Kartu>}
-
-      <Kartu className="p-4">
-        <h2 className="font-extrabold text-gray-800 mb-3">📈 Uang masuk 6 bulan terakhir</h2>
-        <div className="flex items-end gap-2 h-28">
-          {enam.map((e,i)=>(
-            <div key={i} className="flex-1 flex flex-col items-center gap-1">
-              <span className="text-[9px] font-bold text-gray-400">{e.total>0?(e.total/1000000).toFixed(1)+"jt":""}</span>
-              <div className="w-full rounded-t-lg" style={{height:Math.max(4,e.total/maxEnam*80)+"px",background:i===5?HIJAU:"#BBE3CB"}}></div>
-              <span className="text-[10px] font-bold text-gray-500">{e.label}</span>
-            </div>
-          ))}
-        </div>
-      </Kartu>
 
       {inspeksi.length>0&&<Kartu className="p-4">
         <h2 className="font-extrabold text-gray-800 mb-1">📋 Belum diinspeksi lebih dari 30 hari</h2>
